@@ -143,12 +143,14 @@ app.config['nail_settings'] = {'scale': 1.0, 'rotate': -90}
 nail_overlay = NailOverlay("nail.png")
 
 def generate_frames():
-    cap = cv2.VideoCapture(0)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-    cap.set(cv2.CAP_PROP_FPS, 30)
-
     try:
+        cap = cv2.VideoCapture(0)
+        if not cap.isOpened():
+            raise RuntimeError("Could not access webcam")
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+        cap.set(cv2.CAP_PROP_FPS, 30)
+
         while True:
             ret, frame = cap.read()
             if not ret:
@@ -167,8 +169,8 @@ def generate_frames():
             frame = buffer.tobytes()
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-    finally:
-        cap.release()
+    except Exception as e:
+        print(f"Error accessing camera: {e}")
 
 @app.route('/')
 def index():
