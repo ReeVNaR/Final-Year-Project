@@ -296,6 +296,15 @@
             };
             input.click();
         };
+
+        // Add this after your existing script
+        document.addEventListener('DOMContentLoaded', function() {
+            const videoFeed = document.getElementById('videoFeed');
+            
+            videoFeed.onerror = function() {
+                alert('Camera access error. Please ensure you have granted camera permissions.');
+            };
+        });
     </script>
 </body>
 </html>

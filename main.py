@@ -146,31 +146,27 @@ def generate_frames():
     try:
         cap = cv2.VideoCapture(0)
         if not cap.isOpened():
-            raise RuntimeError("Could not access webcam")
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-        cap.set(cv2.CAP_PROP_FPS, 30)
-
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
-
-            frame = cv2.flip(frame, 1)
-            # Get current settings
-            settings = app.config.get('nail_settings', {'scale': 1.0, 'rotate': 0})
-            frame = nail_overlay.detect_and_overlay_nails(
-                frame, 
-                scale_factor=settings['scale'],
-                rotate_angle=settings['rotate']
-            )
+            return b''
             
-            ret, buffer = cv2.imencode('.jpg', frame)
-            frame = buffer.tobytes()
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+        while True:
+            success, frame = cap.read()
+            if not success:
+                break
+            else:
+                # Process frame with nail overlay
+                frame = nail_overlay.detect_and_overlay_nails(frame)
+                
+                # Convert to jpg for streaming
+                ret, buffer = cv2.imencode('.jpg', frame)
+                frame = buffer.tobytes()
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+                
     except Exception as e:
-        print(f"Error accessing camera: {e}")
+        print(f"Camera error: {e}")
+    finally:
+        if 'cap' in locals():
+            cap.release()
 
 @app.route('/')
 def index():
