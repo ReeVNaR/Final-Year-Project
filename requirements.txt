@@ -1,5 +1,6 @@
-flask
-opencv-python-headless
-mediapipe
-numpy
-pillow
+flask==2.0.1
+opencv-python-headless==4.8.1.78
+mediapipe-silicon==0.10.7
+numpy==1.24.3
+pillow==10.0.1
+gunicorn==21.2.0
