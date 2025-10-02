@@ -3,6 +3,8 @@ import mediapipe as mp
 import numpy as np
 import math
 import os
+import base64
+import re
 
 # Configure MediaPipe and suppress warnings
 mp_hands = mp.solutions.hands
@@ -134,7 +136,6 @@ class NailOverlay:
         return frame
 
 from flask import Flask, render_template, Response, request, jsonify
-import base64
 from io import BytesIO
 from PIL import Image
 
@@ -142,40 +143,32 @@ app = Flask(__name__)
 app.config['nail_settings'] = {'scale': 1.0, 'rotate': -90}
 nail_overlay = NailOverlay("nail.png")
 
-def generate_frames():
-    try:
-        cap = cv2.VideoCapture(0)
-        if not cap.isOpened():
-            return b''
-            
-        while True:
-            success, frame = cap.read()
-            if not success:
-                break
-            else:
-                # Process frame with nail overlay
-                frame = nail_overlay.detect_and_overlay_nails(frame)
-                
-                # Convert to jpg for streaming
-                ret, buffer = cv2.imencode('.jpg', frame)
-                frame = buffer.tobytes()
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-                
-    except Exception as e:
-        print(f"Camera error: {e}")
-    finally:
-        if 'cap' in locals():
-            cap.release()
-
 @app.route('/')
 def index():
     return render_template('index.html')
 
-@app.route('/video_feed')
-def video_feed():
-    return Response(generate_frames(),
-                    mimetype='multipart/x-mixed-replace; boundary=frame')
+@app.route('/process_frame', methods=['POST'])
+def process_frame():
+    try:
+        data = request.json['frame']
+        # Remove the data URL prefix
+        encoded_data = re.sub('^data:image/.+;base64,', '', data)
+        # Decode base64 image
+        nparr = np.frombuffer(base64.b64decode(encoded_data), np.uint8)
+        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        # Process frame with nail overlay
+        processed_frame = nail_overlay.detect_and_overlay_nails(frame)
+        
+        # Encode processed frame back to base64
+        _, buffer = cv2.imencode('.jpg', processed_frame)
+        encoded_frame = base64.b64encode(buffer).decode('utf-8')
+        
+        return jsonify({
+            'processed_frame': f'data:image/jpeg;base64,{encoded_frame}'
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/update_settings', methods=['POST'])
 def update_settings():
