@@ -37,7 +37,6 @@ const Navbar = () => {
             <button onClick={() => scrollToSection('hero')} className="text-gray-300 hover:text-pink-500 transition-colors">Home</button>
             <button onClick={() => scrollToSection('products')} className="text-gray-300 hover:text-pink-500 transition-colors">Products</button>
             <button onClick={() => scrollToSection('features')} className="text-gray-300 hover:text-pink-500 transition-colors">Features</button>
-            <button onClick={() => scrollToSection('stats')} className="text-gray-300 hover:text-pink-500 transition-colors">Stats</button>
           </div>
 
           {/* Mobile Menu Button */}
@@ -61,7 +60,6 @@ const Navbar = () => {
             <button onClick={() => scrollToSection('hero')} className="block w-full text-left text-gray-300 hover:text-pink-500 transition-colors">Home</button>
             <button onClick={() => scrollToSection('products')} className="block w-full text-left text-gray-300 hover:text-pink-500 transition-colors">Products</button>
             <button onClick={() => scrollToSection('features')} className="block w-full text-left text-gray-300 hover:text-pink-500 transition-colors">Features</button>
-            <button onClick={() => scrollToSection('stats')} className="block w-full text-left text-gray-300 hover:text-pink-500 transition-colors">Stats</button>
           </div>
         </div>
       </div>
