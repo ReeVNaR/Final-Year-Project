@@ -21,6 +21,8 @@ export default function CameraView() {
   const [selectedDesign, setSelectedDesign] = useState(NAIL_DESIGNS[0]);
   const [facingMode, setFacingMode] = useState('environment');
   const cameraRef = useRef(null);
+  const handsRef = useRef(null);
+  const [isCameraReady, setIsCameraReady] = useState(false);
 
   const loadNailImage = async (design = selectedDesign) => {
     setImageLoaded(false);
@@ -43,10 +45,17 @@ export default function CameraView() {
   };
 
   const toggleCamera = async () => {
-    // Stop current camera
+    setIsCameraReady(false);
+    // Stop current camera and hands
     if (videoRef.current?.srcObject) {
       const tracks = videoRef.current.srcObject.getTracks();
       tracks.forEach(track => track.stop());
+    }
+    if (cameraRef.current) {
+      cameraRef.current.stop();
+    }
+    if (handsRef.current) {
+      await handsRef.current.close();
     }
 
     // Toggle facing mode
@@ -60,7 +69,7 @@ export default function CameraView() {
           video: {
             width: 1280,
             height: 720,
-            facingMode: facingMode
+            facingMode
           }
         });
 
@@ -74,6 +83,8 @@ export default function CameraView() {
           }
         });
 
+        handsRef.current = hands;
+
         hands.setOptions({
           maxNumHands: 2,
           modelComplexity: 1,
@@ -83,16 +94,21 @@ export default function CameraView() {
 
         hands.onResults(onResults);
 
+        await hands.initialize();
+
         if (videoRef.current) {
           const camera = new Camera(videoRef.current, {
             onFrame: async () => {
-              await hands.send({ image: videoRef.current });
+              if (handsRef.current) {
+                await handsRef.current.send({ image: videoRef.current });
+              }
             },
             width: 1280,
             height: 720
           });
           cameraRef.current = camera;
-          camera.start();
+          await camera.start();
+          setIsCameraReady(true);
         }
       } catch (err) {
         setError('Camera access denied. Please enable camera permissions.');
@@ -109,6 +125,9 @@ export default function CameraView() {
       }
       if (cameraRef.current) {
         cameraRef.current.stop();
+      }
+      if (handsRef.current) {
+        handsRef.current.close();
       }
     };
   }, [facingMode]); // Re-run when facing mode changes
@@ -225,9 +244,14 @@ export default function CameraView() {
       <div className="absolute bottom-4 md:bottom-8 left-0 right-0 flex justify-center gap-4 px-4">
         <button 
           onClick={toggleCamera}
-          className="px-4 py-2 md:px-6 md:py-3 text-sm md:text-base bg-pink-600 text-white rounded-full hover:bg-pink-700 transition-colors"
+          disabled={!isCameraReady}
+          className={`px-4 py-2 md:px-6 md:py-3 text-sm md:text-base rounded-full transition-colors ${
+            isCameraReady 
+              ? 'bg-pink-600 text-white hover:bg-pink-700'
+              : 'bg-gray-400 text-gray-200 cursor-not-allowed'
+          }`}
         >
-          Switch Camera
+          {isCameraReady ? 'Switch Camera' : 'Initializing...'}
         </button>
       </div>
     </div>
