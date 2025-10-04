@@ -152,74 +152,101 @@ function CameraView() {
     }
   };
 
+  const getCameraConstraints = () => {
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    
+    return {
+      video: {
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+        facingMode,
+        // Add specific constraints for mobile
+        ...(isMobile && {
+          frameRate: { ideal: 30 },
+          aspectRatio: { ideal: 16/9 },
+        })
+      }
+    };
+  };
+
+  const setupCamera = async () => {
+    if (!isMounted.current || isSwitching) return;
+
+    try {
+      await stopCurrentCamera();
+
+      // Try to get camera access with initial constraints
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(getCameraConstraints());
+      } catch (initialError) {
+        console.error('Initial camera setup failed:', initialError);
+        
+        // Fallback to basic constraints
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode }
+        });
+      }
+
+      if (!isMounted.current) {
+        stream.getTracks().forEach(track => track.stop());
+        return;
+      }
+
+      // Initialize MediaPipe Hands first
+      const hands = await initializeHands();
+      if (!isMounted.current) {
+        hands.close();
+        return;
+      }
+      handsRef.current = hands;
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+
+      hands.onResults(onResults);
+
+      if (videoRef.current && isMounted.current) {
+        const camera = new Camera(videoRef.current, {
+          onFrame: async () => {
+            if (handsRef.current && isMounted.current) {
+              try {
+                await handsRef.current.send({ image: videoRef.current });
+              } catch (err) {
+                if (err.message !== 'SolutionWasm instance already deleted') {
+                  console.error('Hand detection error:', err);
+                }
+              }
+            }
+          },
+          width: 1280,
+          height: 720
+        });
+        
+        cameraRef.current = camera;
+        await camera.start();
+        setIsCameraReady(true);
+      }
+    } catch (err) {
+      console.error('Camera setup error:', err);
+      let errorMessage = 'Camera initialization failed.';
+      
+      if (err.name === 'NotAllowedError') {
+        errorMessage = 'Camera access denied. Please enable camera permissions in your browser settings.';
+      } else if (err.name === 'NotFoundError') {
+        errorMessage = 'No camera found. Please ensure your device has a camera.';
+      } else if (err.name === 'NotReadableError') {
+        errorMessage = 'Camera is in use by another application. Please close other apps using the camera.';
+      }
+      
+      setError(errorMessage);
+    }
+  };
+
   useEffect(() => {
     // Set mounted ref
     isMounted.current = true;
-    
-    async function setupCamera() {
-      // Don't setup if we're in the process of switching
-      if (!isMounted.current || isSwitching) return;
-
-      try {
-        // Clean up any existing instances first
-        await stopCurrentCamera();
-
-        // Initialize MediaPipe Hands first
-        const hands = await initializeHands();
-        if (!isMounted.current) {
-          hands.close();
-          return;
-        }
-        handsRef.current = hands;
-
-        // Set up camera stream
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            width: 1280,
-            height: 720,
-            facingMode
-          }
-        });
-
-        if (!isMounted.current) {
-          stream.getTracks().forEach(track => track.stop());
-          hands.close();
-          return;
-        }
-
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-        }
-
-        hands.onResults(onResults);
-
-        if (videoRef.current && isMounted.current) {
-          const camera = new Camera(videoRef.current, {
-            onFrame: async () => {
-              if (handsRef.current && isMounted.current) {
-                try {
-                  await handsRef.current.send({ image: videoRef.current });
-                } catch (err) {
-                  if (err.message !== 'SolutionWasm instance already deleted') {
-                    console.error('Hand detection error:', err);
-                  }
-                }
-              }
-            },
-            width: 1280,
-            height: 720
-          });
-          
-          cameraRef.current = camera;
-          await camera.start();
-          setIsCameraReady(true);
-        }
-      } catch (err) {
-        console.error('Camera setup error:', err);
-        setError('Camera initialization failed. Please refresh the page.');
-      }
-    }
-
     setupCamera();
 
     return () => {
@@ -368,6 +395,21 @@ function CameraView() {
           {isSwitching ? 'Switching...' : isCameraReady ? 'Switch Camera' : 'Initializing...'}
         </button>
       </div>
+
+      {error && (
+        <div className="absolute top-1/2 left-4 right-4 -translate-y-1/2 bg-red-500/90 text-white px-4 py-3 rounded-lg text-center">
+          {error}
+          <button 
+            onClick={() => {
+              setError(null);
+              setupCamera();
+            }}
+            className="block w-full mt-2 py-2 bg-white/20 rounded hover:bg-white/30"
+          >
+            Try Again
+          </button>
+        </div>
+      )}
     </div>
   );
 }
