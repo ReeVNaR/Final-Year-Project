@@ -68,6 +68,9 @@ function CameraView() {
   const [isCameraReady, setIsCameraReady] = useState(false);
   const [isSwitching, setIsSwitching] = useState(false);
 
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+  const isAndroid = /Android/.test(navigator.userAgent);
+
   const loadNailImage = async (design = selectedDesign) => {
     setImageLoaded(false);
     const img = new Image();
@@ -135,36 +138,60 @@ function CameraView() {
       setIsCameraReady(false);
       setError(null);
 
-      // First, stop the current camera
+      // Stop current camera
       await stopCurrentCamera();
 
-      // Wait for cleanup
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      // Then switch the facing mode
-      setFacingMode(current => current === 'environment' ? 'user' : 'environment');
+      // Different handling for iOS
+      if (isIOS) {
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Longer delay for iOS
+        setFacingMode(current => current === 'environment' ? 'user' : 'environment');
+      } else {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        setFacingMode(current => current === 'environment' ? 'user' : 'environment');
+      }
     } catch (err) {
       console.error('Error toggling camera:', err);
-      setError('Failed to switch camera. Please try again.');
-      setIsCameraReady(true);
+      setError(isIOS ? 
+        'Please refresh the page to switch cameras on iOS' : 
+        'Failed to switch camera. Please try again.'
+      );
     } finally {
       setIsSwitching(false);
     }
   };
 
   const getCameraConstraints = () => {
-    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    
+    if (isIOS) {
+      return {
+        audio: false,
+        video: {
+          facingMode,
+          width: { min: 640, ideal: 1280, max: 1920 },
+          height: { min: 480, ideal: 720, max: 1080 }
+        }
+      };
+    }
+
+    if (isAndroid) {
+      return {
+        audio: false,
+        video: {
+          mandatory: {
+            facingMode,
+            width: { min: 640, ideal: 1280, max: 1920 },
+            height: { min: 480, ideal: 720, max: 1080 }
+          }
+        }
+      };
+    }
+
+    // Desktop constraints
     return {
+      audio: false,
       video: {
         width: { ideal: 1280 },
         height: { ideal: 720 },
-        facingMode,
-        // Add specific constraints for mobile
-        ...(isMobile && {
-          frameRate: { ideal: 30 },
-          aspectRatio: { ideal: 16/9 },
-        })
+        facingMode
       }
     };
   };
@@ -175,16 +202,18 @@ function CameraView() {
     try {
       await stopCurrentCamera();
 
-      // Try to get camera access with initial constraints
       let stream;
       try {
+        // First try with ideal constraints
         stream = await navigator.mediaDevices.getUserMedia(getCameraConstraints());
       } catch (initialError) {
         console.error('Initial camera setup failed:', initialError);
         
         // Fallback to basic constraints
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode }
+          video: isIOS ? 
+            { facingMode: { exact: facingMode } } : 
+            { facingMode }
         });
       }
 
@@ -232,12 +261,12 @@ function CameraView() {
       console.error('Camera setup error:', err);
       let errorMessage = 'Camera initialization failed.';
       
-      if (err.name === 'NotAllowedError') {
-        errorMessage = 'Camera access denied. Please enable camera permissions in your browser settings.';
-      } else if (err.name === 'NotFoundError') {
-        errorMessage = 'No camera found. Please ensure your device has a camera.';
-      } else if (err.name === 'NotReadableError') {
-        errorMessage = 'Camera is in use by another application. Please close other apps using the camera.';
+      if (isIOS && err.name === 'NotReadableError') {
+        errorMessage = 'Camera access failed. Please close other apps using the camera and refresh.';
+      } else if (isAndroid && err.name === 'NotAllowedError') {
+        errorMessage = 'Please grant camera permissions in your browser settings and refresh.';
+      } else if (err.name === 'OverconstrainedError') {
+        errorMessage = 'Camera not compatible. Please try a different browser.';
       }
       
       setError(errorMessage);
