@@ -14,7 +14,7 @@ export default function RootLayout({ children }) {
     </html>
   );
 }
-};
+
 
 export default function RootLayout({ children }) {
   return (
