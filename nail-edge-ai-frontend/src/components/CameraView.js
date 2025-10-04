@@ -19,6 +19,8 @@ export default function CameraView() {
   const [imageLoaded, setImageLoaded] = useState(false);
   const [nailImages, setNailImages] = useState({});
   const [selectedDesign, setSelectedDesign] = useState(NAIL_DESIGNS[0]);
+  const [facingMode, setFacingMode] = useState('environment');
+  const cameraRef = useRef(null);
 
   const loadNailImage = async (design = selectedDesign) => {
     setImageLoaded(false);
@@ -40,6 +42,17 @@ export default function CameraView() {
     });
   };
 
+  const toggleCamera = async () => {
+    // Stop current camera
+    if (videoRef.current?.srcObject) {
+      const tracks = videoRef.current.srcObject.getTracks();
+      tracks.forEach(track => track.stop());
+    }
+
+    // Toggle facing mode
+    setFacingMode(current => current === 'environment' ? 'user' : 'environment');
+  };
+
   useEffect(() => {
     async function setupCamera() {
       try {
@@ -47,7 +60,7 @@ export default function CameraView() {
           video: {
             width: 1280,
             height: 720,
-            facingMode: 'environment'
+            facingMode: facingMode
           }
         });
 
@@ -78,6 +91,7 @@ export default function CameraView() {
             width: 1280,
             height: 720
           });
+          cameraRef.current = camera;
           camera.start();
         }
       } catch (err) {
@@ -93,8 +107,11 @@ export default function CameraView() {
         const tracks = videoRef.current.srcObject.getTracks();
         tracks.forEach(track => track.stop());
       }
+      if (cameraRef.current) {
+        cameraRef.current.stop();
+      }
     };
-  }, []);
+  }, [facingMode]); // Re-run when facing mode changes
 
   useEffect(() => {
     loadNailImage(selectedDesign);
@@ -123,7 +140,7 @@ export default function CameraView() {
           const x = tip.x * width;
           const y = tip.y * height;
           // Make nail size responsive to screen width
-          const nailSize = Math.min(width * 0.05, 64); // 5% of screen width, max 64px
+          const nailSize = Math.min(width * 0.3, 64); // 30% of screen width, max 64px
 
           // Draw debug point
           ctx.beginPath();
@@ -206,7 +223,10 @@ export default function CameraView() {
 
       {/* Bottom controls with responsive spacing */}
       <div className="absolute bottom-4 md:bottom-8 left-0 right-0 flex justify-center gap-4 px-4">
-        <button className="px-4 py-2 md:px-6 md:py-3 text-sm md:text-base bg-pink-600 text-white rounded-full hover:bg-pink-700 transition-colors">
+        <button 
+          onClick={toggleCamera}
+          className="px-4 py-2 md:px-6 md:py-3 text-sm md:text-base bg-pink-600 text-white rounded-full hover:bg-pink-700 transition-colors"
+        >
           Switch Camera
         </button>
       </div>
