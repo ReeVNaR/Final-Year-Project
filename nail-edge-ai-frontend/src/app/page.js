@@ -1,7 +1,7 @@
-import Navbar from '../components/Navbar';
 import HomePage from '../components/HomePage';
+import Navbar from '../components/Navbar';
 
-export default function Home() {
+export default function Page() {
   return (
     <main>
       <Navbar />
@@ -9,3 +9,5 @@ export default function Home() {
     </main>
   );
 }
+
+

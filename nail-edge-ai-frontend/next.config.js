@@ -3,10 +3,9 @@ const nextConfig = {
   output: 'standalone',
   images: {
     unoptimized: true
-  },
-  experimental: {
-    optimizeCss: true
   }
-};
+}
+
+module.exports = nextConfig
 
 module.exports = nextConfig;
