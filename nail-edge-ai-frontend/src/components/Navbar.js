@@ -1,6 +1,5 @@
 'use client';
 import { useState, useEffect } from 'react';
-import Link from 'next/link';
 
 const Navbar = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -14,19 +13,31 @@ const Navbar = () => {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
+  const scrollToSection = (sectionId) => {
+    setIsMenuOpen(false);
+    const element = document.getElementById(sectionId);
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
   return (
     <nav className={`fixed w-full z-50 transition-all duration-300 ${scrolled ? 'bg-black/90' : 'bg-black/80'} backdrop-blur-sm border-b border-white/10`}>
       <div className="container mx-auto px-4 md:px-6 lg:px-8">
         <div className="flex h-16 items-center justify-between">
-          <div className="text-xl font-bold text-white">
+          <div 
+            onClick={() => scrollToSection('hero')} 
+            className="text-xl font-bold text-white cursor-pointer hover:text-pink-500 transition-colors"
+          >
             NailEdge AI
           </div>
           
           {/* Desktop Menu */}
           <div className="hidden md:flex items-center space-x-8">
-            <a href="#" className="text-gray-300 hover:text-pink-500 transition-colors">Home</a>
-            <a href="#features" className="text-gray-300 hover:text-pink-500 transition-colors">Features</a>
-            <a href="#stats" className="text-gray-300 hover:text-pink-500 transition-colors">Stats</a>
+            <button onClick={() => scrollToSection('hero')} className="text-gray-300 hover:text-pink-500 transition-colors">Home</button>
+            <button onClick={() => scrollToSection('products')} className="text-gray-300 hover:text-pink-500 transition-colors">Products</button>
+            <button onClick={() => scrollToSection('features')} className="text-gray-300 hover:text-pink-500 transition-colors">Features</button>
+            <button onClick={() => scrollToSection('stats')} className="text-gray-300 hover:text-pink-500 transition-colors">Stats</button>
           </div>
 
           {/* Mobile Menu Button */}
@@ -47,9 +58,10 @@ const Navbar = () => {
         {/* Mobile Menu Dropdown */}
         <div className={`md:hidden transition-all duration-300 ease-in-out ${isMenuOpen ? 'max-h-48 opacity-100' : 'max-h-0 opacity-0'} overflow-hidden`}>
           <div className="py-4 space-y-4">
-            <a href="#" className="block text-gray-300 hover:text-pink-500 transition-colors">Home</a>
-            <a href="#features" className="block text-gray-300 hover:text-pink-500 transition-colors">Features</a>
-            <a href="#stats" className="block text-gray-300 hover:text-pink-500 transition-colors">Stats</a>
+            <button onClick={() => scrollToSection('hero')} className="block w-full text-left text-gray-300 hover:text-pink-500 transition-colors">Home</button>
+            <button onClick={() => scrollToSection('products')} className="block w-full text-left text-gray-300 hover:text-pink-500 transition-colors">Products</button>
+            <button onClick={() => scrollToSection('features')} className="block w-full text-left text-gray-300 hover:text-pink-500 transition-colors">Features</button>
+            <button onClick={() => scrollToSection('stats')} className="block w-full text-left text-gray-300 hover:text-pink-500 transition-colors">Stats</button>
           </div>
         </div>
       </div>

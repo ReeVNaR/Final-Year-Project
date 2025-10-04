@@ -4,7 +4,7 @@ const HomePage = () => {
   return (
     <>
       {/* Hero Section */}
-      <section className="relative min-h-[100svh] bg-black overflow-hidden">
+      <section id="hero" className="relative min-h-[100svh] bg-black overflow-hidden">
         {/* Social Links - Desktop Only */}
         <div className="hidden lg:flex fixed left-4 top-1/2 -translate-y-1/2 flex-col gap-6 text-pink-300">
           <a href="#" className="hover:text-pink-500 transition-colors">
@@ -51,8 +51,45 @@ const HomePage = () => {
         </div>
       </section>
 
+      {/* Products Section */}
+      <section id="products" className="py-16 md:py-24 bg-zinc-950">
+        <div className="container mx-auto px-4 md:px-6 lg:px-8">
+          <div className="text-center mb-12">
+            <h2 className="text-3xl md:text-4xl font-bold text-white mb-4">
+              Popular Nail Designs
+            </h2>
+            <p className="text-gray-400 max-w-2xl mx-auto">
+              Explore our trending nail art designs and find your perfect style
+            </p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+            {[
+              { title: 'Classic French', price: '$19.99' },
+              { title: 'Glitter Dreams', price: '$24.99' },
+              { title: 'Abstract Art', price: '$29.99' },
+              { title: 'Minimalist Lines', price: '$19.99' },
+              { title: 'Floral Beauty', price: '$24.99' },
+              { title: 'Geometric Patterns', price: '$29.99' },
+            ].map((product, index) => (
+              <div key={index} className="group relative overflow-hidden rounded-2xl bg-zinc-900 p-4">
+                <div className="aspect-square w-full overflow-hidden rounded-xl bg-gradient-to-br from-pink-500/20 to-purple-500/20">
+                  {/* Product image placeholder */}
+                </div>
+                <div className="mt-4">
+                  <h3 className="text-lg font-semibold text-white">{product.title}</h3>
+                  <p className="text-pink-500 font-medium">{product.price}</p>
+                  <button className="mt-3 w-full rounded-full bg-pink-600 py-2 text-sm font-medium text-white hover:bg-pink-700 transition-colors">
+                    Try Now
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* Features Section */}
-      <section className="py-16 md:py-24 bg-zinc-900">
+      <section id="features" className="py-16 md:py-24 bg-zinc-900">
         <div className="container mx-auto px-4 md:px-6 lg:px-8">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 md:gap-12">
             <div className="text-center p-8">
@@ -87,7 +124,7 @@ const HomePage = () => {
       </section>
 
       {/* Stats Section */}
-      <section className="py-16 md:py-24 bg-black">
+      <section id="stats" className="py-16 md:py-24 bg-black">
         <div className="container mx-auto px-4 md:px-6 lg:px-8">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-8">
             {['Users', 'Scans', 'Accuracy', 'Countries'].map((stat, index) => (
