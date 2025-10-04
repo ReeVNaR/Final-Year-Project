@@ -2,7 +2,7 @@
 
 const TryOnButton = () => {
   const handleClick = () => {
-    window.location.href = 'https://nailedgeai.netlify.app/';
+    window.location.href = '/try-on';
   };
 
   return (
