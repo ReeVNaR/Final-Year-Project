@@ -1,4 +1,5 @@
 'use client';
+import React from 'react';
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Hands } from '@mediapipe/hands';
@@ -11,7 +12,49 @@ const NAIL_DESIGNS = [
   { id: 3, name: 'Glitter', image: '/glitter-nail.png' },
 ];
 
-export default function CameraView() {
+class CameraErrorBoundary extends React.Component {
+  state = { hasError: false };
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error('Camera Error:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex items-center justify-center min-h-screen bg-black text-white">
+          <div className="text-center">
+            <h2 className="text-xl mb-4">Camera initialization failed</h2>
+            <button
+              onClick={() => this.setState({ hasError: false })}
+              className="px-4 py-2 bg-pink-600 rounded-full"
+            >
+              Try Again
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+export default function CameraWrapper() {
+  return (
+    <CameraErrorBoundary>
+      <CameraView />
+    </CameraErrorBoundary>
+  );
+}
+
+function CameraView() {
+  // Add mounted ref
+  const isMounted = useRef(true);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const [error, setError] = useState(null);
@@ -23,6 +66,7 @@ export default function CameraView() {
   const cameraRef = useRef(null);
   const handsRef = useRef(null);
   const [isCameraReady, setIsCameraReady] = useState(false);
+  const [isSwitching, setIsSwitching] = useState(false);
 
   const loadNailImage = async (design = selectedDesign) => {
     setImageLoaded(false);
@@ -44,27 +88,91 @@ export default function CameraView() {
     });
   };
 
-  const toggleCamera = async () => {
-    setIsCameraReady(false);
-    // Stop current camera and hands
+  const initializeHands = async () => {
+    try {
+      const hands = new Hands({
+        locateFile: (file) => {
+          return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+        }
+      });
+
+      // Wait for any previous instance to be fully cleaned up
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      await hands.setOptions({
+        maxNumHands: 2,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5
+      });
+
+      return hands;
+    } catch (err) {
+      console.error('Failed to initialize hands:', err);
+      throw err;
+    }
+  };
+
+  const stopCurrentCamera = async () => {
     if (videoRef.current?.srcObject) {
       const tracks = videoRef.current.srcObject.getTracks();
       tracks.forEach(track => track.stop());
+      videoRef.current.srcObject = null;
     }
     if (cameraRef.current) {
       cameraRef.current.stop();
+      cameraRef.current = null;
     }
     if (handsRef.current) {
       await handsRef.current.close();
+      handsRef.current = null;
     }
+  };
 
-    // Toggle facing mode
-    setFacingMode(current => current === 'environment' ? 'user' : 'environment');
+  const toggleCamera = async () => {
+    try {
+      setIsSwitching(true);
+      setIsCameraReady(false);
+      setError(null);
+
+      // First, stop the current camera
+      await stopCurrentCamera();
+
+      // Wait for cleanup
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Then switch the facing mode
+      setFacingMode(current => current === 'environment' ? 'user' : 'environment');
+    } catch (err) {
+      console.error('Error toggling camera:', err);
+      setError('Failed to switch camera. Please try again.');
+      setIsCameraReady(true);
+    } finally {
+      setIsSwitching(false);
+    }
   };
 
   useEffect(() => {
+    // Set mounted ref
+    isMounted.current = true;
+    
     async function setupCamera() {
+      // Don't setup if we're in the process of switching
+      if (!isMounted.current || isSwitching) return;
+
       try {
+        // Clean up any existing instances first
+        await stopCurrentCamera();
+
+        // Initialize MediaPipe Hands first
+        const hands = await initializeHands();
+        if (!isMounted.current) {
+          hands.close();
+          return;
+        }
+        handsRef.current = hands;
+
+        // Set up camera stream
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
             width: 1280,
@@ -73,52 +181,49 @@ export default function CameraView() {
           }
         });
 
+        if (!isMounted.current) {
+          stream.getTracks().forEach(track => track.stop());
+          hands.close();
+          return;
+        }
+
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
         }
 
-        const hands = new Hands({
-          locateFile: (file) => {
-            return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
-          }
-        });
-
-        handsRef.current = hands;
-
-        hands.setOptions({
-          maxNumHands: 2,
-          modelComplexity: 1,
-          minDetectionConfidence: 0.5,
-          minTrackingConfidence: 0.5
-        });
-
         hands.onResults(onResults);
 
-        await hands.initialize();
-
-        if (videoRef.current) {
+        if (videoRef.current && isMounted.current) {
           const camera = new Camera(videoRef.current, {
             onFrame: async () => {
-              if (handsRef.current) {
-                await handsRef.current.send({ image: videoRef.current });
+              if (handsRef.current && isMounted.current) {
+                try {
+                  await handsRef.current.send({ image: videoRef.current });
+                } catch (err) {
+                  if (err.message !== 'SolutionWasm instance already deleted') {
+                    console.error('Hand detection error:', err);
+                  }
+                }
               }
             },
             width: 1280,
             height: 720
           });
+          
           cameraRef.current = camera;
           await camera.start();
           setIsCameraReady(true);
         }
       } catch (err) {
-        setError('Camera access denied. Please enable camera permissions.');
-        console.error('Error accessing camera:', err);
+        console.error('Camera setup error:', err);
+        setError('Camera initialization failed. Please refresh the page.');
       }
     }
 
     setupCamera();
 
     return () => {
+      isMounted.current = false;
       if (videoRef.current?.srcObject) {
         const tracks = videoRef.current.srcObject.getTracks();
         tracks.forEach(track => track.stop());
@@ -130,71 +235,80 @@ export default function CameraView() {
         handsRef.current.close();
       }
     };
-  }, [facingMode]); // Re-run when facing mode changes
+  }, [facingMode, isSwitching]); // Re-run when facing mode or switching state changes
 
   useEffect(() => {
     loadNailImage(selectedDesign);
   }, [selectedDesign]); // Reload when design changes
 
   const onResults = (results) => {
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    const width = videoRef.current.videoWidth;
-    const height = videoRef.current.videoHeight;
-
-    canvas.width = width;
-    canvas.height = height;
-
-    ctx.save();
-    ctx.clearRect(0, 0, width, height);
-    ctx.drawImage(results.image, 0, 0, width, height);
-
-    if (results.multiHandLandmarks && nailImageRef.current) {
-      console.log('Drawing hand landmarks:', results.multiHandLandmarks.length, 'hands detected');
+    try {
+      if (!isMounted.current || !videoRef.current || !canvasRef.current) return;
       
-      for (const landmarks of results.multiHandLandmarks) {
-        const fingertips = [4, 8, 12, 16, 20];
-        fingertips.forEach(tipIndex => {
-          const tip = landmarks[tipIndex];
-          const x = tip.x * width;
-          const y = tip.y * height;
-          // Make nail size responsive to screen width
-          const nailSize = Math.min(width * 0.3, 64); // 30% of screen width, max 64px
+      const canvas = canvasRef.current;
+      const ctx = canvas.getContext('2d');
+      const width = videoRef.current.videoWidth;
+      const height = videoRef.current.videoHeight;
 
-          // Draw debug point
-          ctx.beginPath();
-          ctx.arc(x, y, 3, 0, 2 * Math.PI);
-          ctx.fillStyle = 'red';
-          ctx.fill();
+      if (!width || !height) return;
 
-          // Draw nail image
-          try {
-            ctx.save();
-            // Rotate image based on finger orientation
-            const nextJoint = landmarks[tipIndex - 1];
-            const angle = Math.atan2(
-              nextJoint.y - tip.y,
-              nextJoint.x - tip.x
-            );
-            
-            ctx.translate(x, y);
-            ctx.rotate(angle - Math.PI/2);
-            // Adjust position to better align with fingertips
-            ctx.drawImage(
-              nailImageRef.current,
-              -nailSize/2,
-              -nailSize/2 - 20, // Offset upward slightly
-              nailSize,
-              nailSize
-            );
-            ctx.restore();
-          } catch (err) {
-            console.error('Error drawing nail:', err);
-          }
-        });
+      canvas.width = width;
+      canvas.height = height;
+
+      ctx.save();
+      ctx.clearRect(0, 0, width, height);
+      ctx.drawImage(results.image, 0, 0, width, height);
+
+      if (results.multiHandLandmarks && nailImageRef.current) {
+        console.log('Drawing hand landmarks:', results.multiHandLandmarks.length, 'hands detected');
+        
+        for (const landmarks of results.multiHandLandmarks) {
+          const fingertips = [4, 8, 12, 16, 20];
+          fingertips.forEach(tipIndex => {
+            const tip = landmarks[tipIndex];
+            const x = tip.x * width;
+            const y = tip.y * height;
+            // Make nail size responsive to screen width
+            const nailSize = Math.min(width * 0.3, 64); // 30% of screen width, max 64px
+
+            // Draw debug point
+            ctx.beginPath();
+            ctx.arc(x, y, 3, 0, 2 * Math.PI);
+            ctx.fillStyle = 'red';
+            ctx.fill();
+
+            // Draw nail image
+            try {
+              ctx.save();
+              // Rotate image based on finger orientation
+              const nextJoint = landmarks[tipIndex - 1];
+              const angle = Math.atan2(
+                nextJoint.y - tip.y,
+                nextJoint.x - tip.x
+              );
+              
+              ctx.translate(x, y);
+              ctx.rotate(angle - Math.PI/2);
+              // Adjust position to better align with fingertips
+              ctx.drawImage(
+                nailImageRef.current,
+                -nailSize/2,
+                -nailSize/2 - 20, // Offset upward slightly
+                nailSize,
+                nailSize
+              );
+              ctx.restore();
+            } catch (err) {
+              console.error('Error drawing nail:', err);
+            }
+          });
+        }
       }
+      ctx.restore();
+    } catch (error) {
+      console.error('Hand tracking error:', error);
+      // Continue running but log the error
     }
-    ctx.restore();
   };
 
   return (
@@ -244,14 +358,14 @@ export default function CameraView() {
       <div className="absolute bottom-4 md:bottom-8 left-0 right-0 flex justify-center gap-4 px-4">
         <button 
           onClick={toggleCamera}
-          disabled={!isCameraReady}
+          disabled={!isCameraReady || isSwitching}
           className={`px-4 py-2 md:px-6 md:py-3 text-sm md:text-base rounded-full transition-colors ${
-            isCameraReady 
+            isCameraReady && !isSwitching
               ? 'bg-pink-600 text-white hover:bg-pink-700'
               : 'bg-gray-400 text-gray-200 cursor-not-allowed'
           }`}
         >
-          {isCameraReady ? 'Switch Camera' : 'Initializing...'}
+          {isSwitching ? 'Switching...' : isCameraReady ? 'Switch Camera' : 'Initializing...'}
         </button>
       </div>
     </div>
