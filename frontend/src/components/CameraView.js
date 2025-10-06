@@ -67,6 +67,8 @@ function CameraView() {
   const handsRef = useRef(null);
   const [isCameraReady, setIsCameraReady] = useState(false);
   const [isSwitching, setIsSwitching] = useState(false);
+  const [cameras, setCameras] = useState([]);
+  const [currentCameraIndex, setCurrentCameraIndex] = useState(0);
 
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
   const isAndroid = /Android/.test(navigator.userAgent);
@@ -133,26 +135,22 @@ function CameraView() {
   };
 
   const toggleCamera = async () => {
-    try {
-      setIsSwitching(true);
-      setIsCameraReady(false);
-      setError(null);
+    if (cameras.length <= 1) return; // No extra cameras to switch to
 
-      // Full teardown before switching
-      await stopCurrentCamera();
-      await new Promise(res => setTimeout(res, 400)); // Give browser time to release the camera
+    setIsSwitching(true);
+    setIsCameraReady(false);
+    setError(null);
 
-      setFacingMode(prev => (prev === 'environment' ? 'user' : 'environment'));
-    } catch (err) {
-      console.error('Error toggling camera:', err);
-      setError(
-        isIOS
-          ? 'Camera switching may require a page refresh on iOS.'
-          : 'Failed to switch camera. Please try again.'
-      );
-    } finally {
+    await stopCurrentCamera();
+
+    // Cycle to next camera index
+    setCurrentCameraIndex((prevIndex) => (prevIndex + 1) % cameras.length);
+
+    // Wait a moment for state to update before reinitializing
+    setTimeout(() => {
+      setupCamera();
       setIsSwitching(false);
-    }
+    }, 500);
   };
 
   const getCameraConstraints = () => {
@@ -194,82 +192,58 @@ function CameraView() {
   const setupCamera = async () => {
     if (!isMounted.current || isSwitching) return;
 
-    // ✅ If camera is already active, do nothing (prevents double init bugs)
-    if (cameraRef.current) {
-      return;
-    }
-
     try {
       await stopCurrentCamera();
 
-      let stream;
-      try {
-        // First try with ideal constraints
-        stream = await navigator.mediaDevices.getUserMedia(getCameraConstraints());
-      } catch (initialError) {
-        console.error('Initial camera setup failed:', initialError);
-        
-        // Fallback to basic constraints
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: isIOS ? 
-            { facingMode: { exact: facingMode } } : 
-            { facingMode }
-        });
+      if (cameras.length === 0) {
+        console.warn('No cameras available');
+        return;
       }
 
+      const deviceId = cameras[currentCameraIndex]?.deviceId;
+      if (!deviceId) {
+        console.error('Invalid deviceId');
+        return;
+      }
+
+      const constraints = {
+        audio: false,
+        video: {
+          deviceId: { exact: deviceId },
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        }
+      };
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       if (!isMounted.current) {
         stream.getTracks().forEach(track => track.stop());
         return;
       }
 
-      // Initialize MediaPipe Hands first
       const hands = await initializeHands();
-      if (!isMounted.current) {
-        hands.close();
-        return;
-      }
       handsRef.current = hands;
 
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
+      videoRef.current.srcObject = stream;
 
       hands.onResults(onResults);
 
-      if (videoRef.current && isMounted.current) {
-        const camera = new Camera(videoRef.current, {
-          onFrame: async () => {
-            if (handsRef.current && isMounted.current) {
-              try {
-                await handsRef.current.send({ image: videoRef.current });
-              } catch (err) {
-                if (err.message !== 'SolutionWasm instance already deleted') {
-                  console.error('Hand detection error:', err);
-                }
-              }
-            }
-          },
-          width: 1280,
-          height: 720
-        });
-        
-        cameraRef.current = camera;
-        await camera.start();
-        setIsCameraReady(true);
-      }
+      const camera = new Camera(videoRef.current, {
+        onFrame: async () => {
+          if (handsRef.current && isMounted.current) {
+            await handsRef.current.send({ image: videoRef.current });
+          }
+        },
+        width: 1280,
+        height: 720
+      });
+
+      cameraRef.current = camera;
+      await camera.start();
+      setIsCameraReady(true);
     } catch (err) {
       console.error('Camera setup error:', err);
-      let errorMessage = 'Camera initialization failed.';
-      
-      if (isIOS && err.name === 'NotReadableError') {
-        errorMessage = 'Camera access failed. Please close other apps using the camera and refresh.';
-      } else if (isAndroid && err.name === 'NotAllowedError') {
-        errorMessage = 'Please grant camera permissions in your browser settings and refresh.';
-      } else if (err.name === 'OverconstrainedError') {
-        errorMessage = 'Camera not compatible. Please try a different browser.';
-      }
-      
-      setError(errorMessage);
+      setError('Failed to initialize camera.');
     }
   };
 
@@ -287,6 +261,20 @@ function CameraView() {
   useEffect(() => {
     loadNailImage(selectedDesign);
   }, [selectedDesign]); // Reload when design changes
+
+  useEffect(() => {
+    async function fetchCameras() {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoDevices = devices.filter(device => device.kind === 'videoinput');
+        setCameras(videoDevices);
+      } catch (err) {
+        console.error('Failed to get camera devices:', err);
+      }
+    }
+
+    fetchCameras();
+  }, []);
 
   const onResults = (results) => {
     try {
