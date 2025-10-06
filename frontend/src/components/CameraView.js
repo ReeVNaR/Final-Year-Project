@@ -192,46 +192,71 @@ function CameraView() {
   const setupCamera = async () => {
     if (!isMounted.current || isSwitching) return;
 
+    // If camera is already ready, don't reinitialize
+    if (cameraRef.current && isCameraReady) {
+      return;
+    }
+
     try {
       await stopCurrentCamera();
+      setIsCameraReady(false);
 
+      // Default to first camera if none selected
       if (cameras.length === 0) {
-        console.warn('No cameras available');
-        return;
-      }
-
-      const deviceId = cameras[currentCameraIndex]?.deviceId;
-      if (!deviceId) {
-        console.error('Invalid deviceId');
-        return;
-      }
-
-      const constraints = {
-        audio: false,
-        video: {
-          deviceId: { exact: deviceId },
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          }
+        });
+        
+        if (!isMounted.current) {
+          stream.getTracks().forEach(track => track.stop());
+          return;
         }
-      };
 
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      if (!isMounted.current) {
-        stream.getTracks().forEach(track => track.stop());
-        return;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+      } else {
+        const deviceId = cameras[currentCameraIndex]?.deviceId;
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            deviceId: deviceId ? { exact: deviceId } : undefined,
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          }
+        });
+
+        if (!isMounted.current) {
+          stream.getTracks().forEach(track => track.stop());
+          return;
+        }
+
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
       }
 
       const hands = await initializeHands();
+      if (!isMounted.current) {
+        hands.close();
+        return;
+      }
       handsRef.current = hands;
-
-      videoRef.current.srcObject = stream;
 
       hands.onResults(onResults);
 
       const camera = new Camera(videoRef.current, {
         onFrame: async () => {
-          if (handsRef.current && isMounted.current) {
-            await handsRef.current.send({ image: videoRef.current });
+          try {
+            if (handsRef.current && isMounted.current) {
+              await handsRef.current.send({ image: videoRef.current });
+            }
+          } catch (err) {
+            if (err.message !== 'SolutionWasm instance already deleted') {
+              console.error('Hand detection error:', err);
+            }
           }
         },
         width: 1280,
@@ -243,38 +268,44 @@ function CameraView() {
       setIsCameraReady(true);
     } catch (err) {
       console.error('Camera setup error:', err);
-      setError('Failed to initialize camera.');
+      setError(
+        err.name === 'NotAllowedError' 
+          ? 'Camera access denied. Please allow camera access and try again.'
+          : 'Failed to initialize camera. Please try again.'
+      );
+      setIsCameraReady(false);
     }
   };
 
+  // Update useEffect to handle camera permissions
   useEffect(() => {
-    // Set mounted ref
-    isMounted.current = true;
-    setupCamera();
+    async function initialize() {
+      try {
+        // First request camera permissions
+        await navigator.mediaDevices.getUserMedia({ video: true });
+        // Then fetch available cameras
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoDevices = devices.filter(device => device.kind === 'videoinput');
+        setCameras(videoDevices);
+        // Finally setup the camera
+        await setupCamera();
+      } catch (err) {
+        console.error('Initialization error:', err);
+        setError('Please grant camera permissions to use this feature.');
+      }
+    }
 
+    initialize();
+    
     return () => {
       isMounted.current = false;
       stopCurrentCamera();
     };
-  }, [facingMode, isSwitching]); // Re-run when facing mode or switching state changes
+  }, []);
 
   useEffect(() => {
     loadNailImage(selectedDesign);
   }, [selectedDesign]); // Reload when design changes
-
-  useEffect(() => {
-    async function fetchCameras() {
-      try {
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const videoDevices = devices.filter(device => device.kind === 'videoinput');
-        setCameras(videoDevices);
-      } catch (err) {
-        console.error('Failed to get camera devices:', err);
-      }
-    }
-
-    fetchCameras();
-  }, []);
 
   const onResults = (results) => {
     try {
@@ -421,5 +452,5 @@ function CameraView() {
     </div>
   );
 }
-    
+
 
