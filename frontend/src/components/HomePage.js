@@ -21,7 +21,7 @@ const HomePage = () => {
               <div className="flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-6 animate-fade-in delay-300">
                 <TryOnButton />
                 <div className="text-pink-400">
-                  From<br/>
+                  For<br/>
                   <span className="text-2xl font-bold">FREE</span>
                 </div>
               </div>

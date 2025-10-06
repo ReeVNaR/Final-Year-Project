@@ -138,22 +138,17 @@ function CameraView() {
       setIsCameraReady(false);
       setError(null);
 
-      // Stop current camera
+      // Full teardown before switching
       await stopCurrentCamera();
+      await new Promise(res => setTimeout(res, 400)); // Give browser time to release the camera
 
-      // Different handling for iOS
-      if (isIOS) {
-        await new Promise(resolve => setTimeout(resolve, 1000)); // Longer delay for iOS
-        setFacingMode(current => current === 'environment' ? 'user' : 'environment');
-      } else {
-        await new Promise(resolve => setTimeout(resolve, 500));
-        setFacingMode(current => current === 'environment' ? 'user' : 'environment');
-      }
+      setFacingMode(prev => (prev === 'environment' ? 'user' : 'environment'));
     } catch (err) {
       console.error('Error toggling camera:', err);
-      setError(isIOS ? 
-        'Please refresh the page to switch cameras on iOS' : 
-        'Failed to switch camera. Please try again.'
+      setError(
+        isIOS
+          ? 'Camera switching may require a page refresh on iOS.'
+          : 'Failed to switch camera. Please try again.'
       );
     } finally {
       setIsSwitching(false);
@@ -198,6 +193,11 @@ function CameraView() {
 
   const setupCamera = async () => {
     if (!isMounted.current || isSwitching) return;
+
+    // ✅ If camera is already active, do nothing (prevents double init bugs)
+    if (cameraRef.current) {
+      return;
+    }
 
     try {
       await stopCurrentCamera();
@@ -280,16 +280,7 @@ function CameraView() {
 
     return () => {
       isMounted.current = false;
-      if (videoRef.current?.srcObject) {
-        const tracks = videoRef.current.srcObject.getTracks();
-        tracks.forEach(track => track.stop());
-      }
-      if (cameraRef.current) {
-        cameraRef.current.stop();
-      }
-      if (handsRef.current) {
-        handsRef.current.close();
-      }
+      stopCurrentCamera();
     };
   }, [facingMode, isSwitching]); // Re-run when facing mode or switching state changes
 
@@ -442,3 +433,5 @@ function CameraView() {
     </div>
   );
 }
+    
+
