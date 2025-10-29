@@ -69,6 +69,7 @@ function CameraView() {
   const [isSwitching, setIsSwitching] = useState(false);
   const [cameras, setCameras] = useState([]);
   const [currentCameraIndex, setCurrentCameraIndex] = useState(0);
+  const [nailSize, setNailSize] = useState(32); // Changed initial size to 32
 
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
   const isAndroid = /Android/.test(navigator.userAgent);
@@ -196,21 +197,20 @@ function CameraView() {
       await stopCurrentCamera();
       setIsCameraReady(false);
 
-      // First request basic camera access
-      await navigator.mediaDevices.getUserMedia({ video: true });
-      
-      // Then get available devices
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const videoDevices = devices.filter(device => device.kind === 'videoinput');
-      setCameras(videoDevices);
+      // Get screen dimensions
+      const screenWidth = window.innerWidth;
+      const screenHeight = window.innerHeight;
+      const aspectRatio = screenWidth / screenHeight;
 
-      // Setup stream with proper device ID or fallback
-      const deviceId = videoDevices[currentCameraIndex]?.deviceId;
+      // Updated camera constraints with dynamic aspect ratio
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
-          deviceId: deviceId ? { exact: deviceId } : undefined,
-          width: 1280,
-          height: 720
+          deviceId: cameras[currentCameraIndex]?.deviceId 
+            ? { exact: cameras[currentCameraIndex].deviceId }
+            : undefined,
+          width: { ideal: Math.max(1280, screenWidth) },
+          height: { ideal: Math.max(720, screenHeight) },
+          aspectRatio: { ideal: aspectRatio }
         }
       });
 
@@ -292,6 +292,10 @@ function CameraView() {
     loadNailImage(selectedDesign);
   }, [selectedDesign]); // Reload when design changes
 
+  const handleNailSizeChange = (delta) => {
+    setNailSize(prev => Math.max(16, Math.min(64, prev + delta)));
+  };
+
   const onResults = (results) => {
     try {
       if (!isMounted.current || !videoRef.current || !canvasRef.current) return;
@@ -311,28 +315,27 @@ function CameraView() {
       ctx.drawImage(results.image, 0, 0, width, height);
 
       if (results.multiHandLandmarks && nailImageRef.current) {
-        console.log('Drawing hand landmarks:', results.multiHandLandmarks.length, 'hands detected');
-        
         for (const landmarks of results.multiHandLandmarks) {
           const fingertips = [4, 8, 12, 16, 20];
           fingertips.forEach(tipIndex => {
             const tip = landmarks[tipIndex];
             const x = tip.x * width;
             const y = tip.y * height;
-            // Make nail size responsive to screen width
-            const nailSize = Math.min(width * 0.3, 64); // 30% of screen width, max 64px
+            
+            // Calculate finger width for proportional nail size
+            const nextJoint = landmarks[tipIndex - 1];
+            const jointX = nextJoint.x * width;
+            const jointY = nextJoint.y * height;
+            const fingerWidth = Math.sqrt(
+              Math.pow(x - jointX, 2) + Math.pow(y - jointY, 2)
+            );
+            
+            // Adjust nail size based on finger width and user preference
+            const currentNailSize = Math.min(fingerWidth, nailSize);
 
-            // Draw debug point
-            ctx.beginPath();
-            ctx.arc(x, y, 3, 0, 2 * Math.PI);
-            ctx.fillStyle = 'red';
-            ctx.fill();
-
-            // Draw nail image
+            // Draw nail image with adjusted positioning
             try {
               ctx.save();
-              // Rotate image based on finger orientation
-              const nextJoint = landmarks[tipIndex - 1];
               const angle = Math.atan2(
                 nextJoint.y - tip.y,
                 nextJoint.x - tip.x
@@ -340,13 +343,12 @@ function CameraView() {
               
               ctx.translate(x, y);
               ctx.rotate(angle - Math.PI/2);
-              // Adjust position to better align with fingertips
               ctx.drawImage(
                 nailImageRef.current,
-                -nailSize/2,
-                -nailSize/2 - 20, // Offset upward slightly
-                nailSize,
-                nailSize
+                -currentNailSize/2,
+                -currentNailSize/2 - currentNailSize * 0.2, // Proportional offset
+                currentNailSize,
+                currentNailSize
               );
               ctx.restore();
             } catch (err) {
@@ -358,22 +360,23 @@ function CameraView() {
       ctx.restore();
     } catch (error) {
       console.error('Hand tracking error:', error);
-      // Continue running but log the error
     }
   };
 
   return (
-    <div className="relative min-h-screen flex items-center justify-center bg-black">
-      <video
-        ref={videoRef}
-        className="absolute w-full h-full object-cover"
-        autoPlay
-        playsInline
-      />
-      <canvas
-        ref={canvasRef}
-        className="absolute w-full h-full object-cover"
-      />
+    <div className="relative min-h-screen flex items-center justify-center bg-black overflow-hidden">
+      <div className="absolute inset-0 flex items-center justify-center">
+        <video
+          ref={videoRef}
+          className="absolute min-w-full min-h-full w-auto h-auto object-cover"
+          autoPlay
+          playsInline
+        />
+        <canvas
+          ref={canvasRef}
+          className="absolute min-w-full min-h-full w-auto h-auto object-cover"
+        />
+      </div>
       {!imageLoaded && (
         <div className="absolute top-2 left-2 md:top-4 md:left-4 bg-yellow-500/80 text-white px-3 py-1 md:px-4 md:py-2 rounded text-sm md:text-base">
           Loading nail overlay...
@@ -420,6 +423,22 @@ function CameraView() {
         </button>
       </div>
 
+      {/* Size control buttons */}
+      <div className="absolute right-4 top-1/2 -translate-y-1/2 flex flex-col gap-2">
+        <button
+          onClick={() => handleNailSizeChange(2)}
+          className="w-10 h-10 rounded-full bg-white/20 text-white hover:bg-white/30"
+        >
+          +
+        </button>
+        <button
+          onClick={() => handleNailSizeChange(-2)}
+          className="w-10 h-10 rounded-full bg-white/20 text-white hover:bg-white/30"
+        >
+          -
+        </button>
+      </div>
+
       {error && (
         <div className="absolute top-1/2 left-4 right-4 -translate-y-1/2 bg-red-500/90 text-white px-4 py-3 rounded-lg text-center">
           {error}
@@ -437,3 +456,4 @@ function CameraView() {
     </div>
   );
 }
+
