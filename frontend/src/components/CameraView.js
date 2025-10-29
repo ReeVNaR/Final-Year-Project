@@ -196,16 +196,21 @@ function CameraView() {
       await stopCurrentCamera();
       setIsCameraReady(false);
 
-      const deviceId = cameras[currentCameraIndex]?.deviceId;
+      // First request basic camera access
+      await navigator.mediaDevices.getUserMedia({ video: true });
+      
+      // Then get available devices
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoDevices = devices.filter(device => device.kind === 'videoinput');
+      setCameras(videoDevices);
+
+      // Setup stream with proper device ID or fallback
+      const deviceId = videoDevices[currentCameraIndex]?.deviceId;
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: deviceId ? {
-          deviceId: { exact: deviceId },
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        } : {
-          facingMode: 'environment',
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
+        video: {
+          deviceId: deviceId ? { exact: deviceId } : undefined,
+          width: 1280,
+          height: 720
         }
       });
 
@@ -214,19 +219,36 @@ function CameraView() {
         return;
       }
 
-      videoRef.current.srcObject = stream;
-      
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        // Wait for video to be ready
+        await new Promise((resolve) => {
+          videoRef.current.onloadedmetadata = resolve;
+        });
+      }
+
+      // Initialize hands after video is ready
       const hands = await initializeHands();
+      await hands.initialize();
+      
+      if (!isMounted.current) {
+        hands.close();
+        return;
+      }
+
       handsRef.current = hands;
       hands.onResults(onResults);
 
+      // Start camera after hands is ready
       const camera = new Camera(videoRef.current, {
         onFrame: async () => {
-          if (handsRef.current && isMounted.current) {
+          if (handsRef.current && isMounted.current && videoRef.current.readyState === 4) {
             try {
               await handsRef.current.send({ image: videoRef.current });
             } catch (err) {
-              console.error('Hand detection error:', err);
+              if (!err.message.includes('already deleted')) {
+                console.error('Hand detection error:', err);
+              }
             }
           }
         },
@@ -239,27 +261,27 @@ function CameraView() {
       setIsCameraReady(true);
     } catch (err) {
       console.error('Camera setup error:', err);
-      setError('Failed to initialize camera. Please try again.');
+      setError(
+        err.name === 'NotAllowedError'
+          ? 'Please grant camera permissions and try again'
+          : 'Failed to initialize camera. Please try again.'
+      );
       setIsCameraReady(false);
     }
   };
 
-  // Update useEffect to handle camera permissions
+  // Update initialization useEffect
   useEffect(() => {
-    async function initialize() {
-      try {
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const videoDevices = devices.filter(device => device.kind === 'videoinput');
-        setCameras(videoDevices);
-        await setupCamera();
-      } catch (err) {
-        console.error('Initialization error:', err);
-        setError('Camera initialization failed. Please grant permissions and refresh.');
-      }
-    }
+    isMounted.current = true;
+    setupCamera();
 
-    initialize();
-    
+    // Request permissions on mount
+    navigator.mediaDevices.getUserMedia({ video: true })
+      .catch(err => {
+        console.error('Permission error:', err);
+        setError('Camera permission is required');
+      });
+
     return () => {
       isMounted.current = false;
       stopCurrentCamera();
@@ -415,4 +437,3 @@ function CameraView() {
     </div>
   );
 }
-       

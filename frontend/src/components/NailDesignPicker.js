@@ -5,18 +5,18 @@ import Image from 'next/image';
 const nailDesigns = [
   { 
     id: 1, 
-    name: 'Pink Glitter',
-    image: '/images/nails/pink.png'
+    name: 'Basic',
+    image: '/nail.png'
   },
   { 
     id: 2, 
-    name: 'French Tips',
-    image: '/images/nails/french.png'
+    name: 'French',
+    image: '/french-nail.png'
   },
   { 
     id: 3, 
-    name: 'Metallic Gold',
-    image: '/images/nails/gold.png'
+    name: 'Glitter',
+    image: '/glitter-nail.png'
   }
 ];
 
