@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Hands } from '@mediapipe/hands';
 import { Camera } from '@mediapipe/camera_utils';
 import { drawConnectors, drawLandmarks } from '@mediapipe/drawing_utils';
+import autoprefixer from 'autoprefixer';
 
 const NAIL_DESIGNS = [
   { id: 1, name: 'Basic', image: '/nail.png' },
@@ -69,7 +70,7 @@ function CameraView() {
   const [isSwitching, setIsSwitching] = useState(false);
   const [cameras, setCameras] = useState([]);
   const [currentCameraIndex, setCurrentCameraIndex] = useState(0);
-  const [nailSize, setNailSize] = useState(32); // Changed initial size to 32
+  const [nailSize, setNailSize] = useState(62); // Increased from 32 to 48
 
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
   const isAndroid = /Android/.test(navigator.userAgent);
@@ -155,37 +156,10 @@ function CameraView() {
   };
 
   const getCameraConstraints = () => {
-    if (isIOS) {
-      return {
-        audio: false,
-        video: {
-          facingMode,
-          width: { min: 640, ideal: 1280, max: 1920 },
-          height: { min: 480, ideal: 720, max: 1080 }
-        }
-      };
-    }
-
-    if (isAndroid) {
-      return {
-        audio: false,
-        video: {
-          mandatory: {
-            facingMode,
-            width: { min: 640, ideal: 1280, max: 1920 },
-            height: { min: 480, ideal: 720, max: 1080 }
-          }
-        }
-      };
-    }
-
-    // Desktop constraints
     return {
       audio: false,
       video: {
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
-        facingMode
+        facingMode: facingMode,
       }
     };
   };
@@ -197,23 +171,9 @@ function CameraView() {
       await stopCurrentCamera();
       setIsCameraReady(false);
 
-      // Get screen dimensions
-      const screenWidth = window.innerWidth;
-      const screenHeight = window.innerHeight;
-      const aspectRatio = screenWidth / screenHeight;
-
-      // Updated camera constraints with dynamic aspect ratio
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          deviceId: cameras[currentCameraIndex]?.deviceId 
-            ? { exact: cameras[currentCameraIndex].deviceId }
-            : undefined,
-          width: { ideal: Math.max(1280, screenWidth) },
-          height: { ideal: Math.max(720, screenHeight) },
-          aspectRatio: { ideal: aspectRatio }
-        }
-      });
-
+      const constraints = getCameraConstraints();
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      
       if (!isMounted.current) {
         stream.getTracks().forEach(track => track.stop());
         return;
@@ -221,9 +181,17 @@ function CameraView() {
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        // Wait for video to be ready
         await new Promise((resolve) => {
-          videoRef.current.onloadedmetadata = resolve;
+          videoRef.current.onloadedmetadata = () => {
+            const track = stream.getVideoTracks()[0];
+            const settings = track.getSettings();
+            
+            if (canvasRef.current) {
+              canvasRef.current.width = settings.width;
+              canvasRef.current.height = settings.height;
+            }
+            resolve();
+          };
         });
       }
 
@@ -251,9 +219,7 @@ function CameraView() {
               }
             }
           }
-        },
-        width: 1280,
-        height: 720
+        }
       });
 
       cameraRef.current = camera;
@@ -293,7 +259,7 @@ function CameraView() {
   }, [selectedDesign]); // Reload when design changes
 
   const handleNailSizeChange = (delta) => {
-    setNailSize(prev => Math.max(16, Math.min(64, prev + delta)));
+    setNailSize(prev => Math.max(24, Math.min(96, prev + delta))); // Increased min/max limits
   };
 
   const onResults = (results) => {
@@ -315,46 +281,78 @@ function CameraView() {
       ctx.drawImage(results.image, 0, 0, width, height);
 
       if (results.multiHandLandmarks && nailImageRef.current) {
-        for (const landmarks of results.multiHandLandmarks) {
-          const fingertips = [4, 8, 12, 16, 20];
-          fingertips.forEach(tipIndex => {
-            const tip = landmarks[tipIndex];
-            const x = tip.x * width;
-            const y = tip.y * height;
-            
-            // Calculate finger width for proportional nail size
-            const nextJoint = landmarks[tipIndex - 1];
-            const jointX = nextJoint.x * width;
-            const jointY = nextJoint.y * height;
-            const fingerWidth = Math.sqrt(
-              Math.pow(x - jointX, 2) + Math.pow(y - jointY, 2)
-            );
-            
-            // Adjust nail size based on finger width and user preference
-            const currentNailSize = Math.min(fingerWidth, nailSize);
+        for (const [index, landmarks] of results.multiHandLandmarks.entries()) {
+          // Get hand information
+          const handedness = results.multiHandedness[index].label;
+          
+          // Reference points for palm orientation
+          const wrist = landmarks[0];
+          const thumb = landmarks[4];
+          const index_tip = landmarks[8];
+          const middle = landmarks[12];
+          const pinky = landmarks[20];
 
-            // Draw nail image with adjusted positioning
-            try {
-              ctx.save();
-              const angle = Math.atan2(
-                nextJoint.y - tip.y,
-                nextJoint.x - tip.x
+          // Calculate palm normal vector using cross product
+          const palm_vector1 = {
+            x: middle.x - wrist.x,
+            y: middle.y - wrist.y,
+            z: middle.z - wrist.z
+          };
+
+          const palm_vector2 = {
+            x: pinky.x - index_tip.x,
+            y: pinky.y - index_tip.y,
+            z: pinky.z - index_tip.z
+          };
+
+          // Cross product to get palm normal
+          const palm_normal = {
+            x: (palm_vector1.y * palm_vector2.z) - (palm_vector1.z * palm_vector2.y),
+            y: (palm_vector1.z * palm_vector2.x) - (palm_vector1.x * palm_vector2.z),
+            z: (palm_vector1.x * palm_vector2.y) - (palm_vector1.y * palm_vector2.x)
+          };
+
+          // Check if palm is facing camera (negative z means facing camera)
+          const isPalmAway = handedness === 'Left' ? palm_normal.z > 0 : palm_normal.z < 0;
+
+          if (isPalmAway) {
+            const fingertips = [4, 8, 12, 16, 20];
+            fingertips.forEach(tipIndex => {
+              const tip = landmarks[tipIndex];
+              const x = tip.x * width;
+              const y = tip.y * height;
+              
+              const nextJoint = landmarks[tipIndex - 1];
+              const jointX = nextJoint.x * width;
+              const jointY = nextJoint.y * height;
+              const fingerWidth = Math.sqrt(
+                Math.pow(x - jointX, 2) + Math.pow(y - jointY, 2)
               );
               
-              ctx.translate(x, y);
-              ctx.rotate(angle - Math.PI/2);
-              ctx.drawImage(
-                nailImageRef.current,
-                -currentNailSize/2,
-                -currentNailSize/2 - currentNailSize * 0.2, // Proportional offset
-                currentNailSize,
-                currentNailSize
-              );
-              ctx.restore();
-            } catch (err) {
-              console.error('Error drawing nail:', err);
-            }
-          });
+              const currentNailSize = Math.min(fingerWidth * 1.2, nailSize);
+
+              try {
+                ctx.save();
+                const angle = Math.atan2(
+                  nextJoint.y - tip.y,
+                  nextJoint.x - tip.x
+                );
+                
+                ctx.translate(x, y);
+                ctx.rotate(angle - Math.PI/2);
+                ctx.drawImage(
+                  nailImageRef.current,
+                  -currentNailSize/2,
+                  -currentNailSize/2 - currentNailSize * 0.2,
+                  currentNailSize,
+                  currentNailSize
+                );
+                ctx.restore();
+              } catch (err) {
+                console.error('Error drawing nail:', err);
+              }
+            });
+          }
         }
       }
       ctx.restore();
@@ -368,13 +366,14 @@ function CameraView() {
       <div className="absolute inset-0 flex items-center justify-center">
         <video
           ref={videoRef}
-          className="absolute min-w-full min-h-full w-auto h-auto object-cover"
+          className="absolute w-full h-full object-cover bg-black"
           autoPlay
           playsInline
+          muted
         />
         <canvas
           ref={canvasRef}
-          className="absolute min-w-full min-h-full w-auto h-auto object-cover"
+          className="absolute w-full h-full object-cover"
         />
       </div>
       {!imageLoaded && (
@@ -456,4 +455,5 @@ function CameraView() {
     </div>
   );
 }
-
+    
+      
