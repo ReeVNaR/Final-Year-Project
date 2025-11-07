@@ -71,42 +71,43 @@ const HomePage = () => {
         </div>
       </section>
 
-      {/* Features & Stats Combined Section */}
+      {/* Features Section with Modern Layout */}
       <section id="features" className="min-h-screen bg-gradient-to-b from-zinc-900 to-black flex items-center py-16 relative">
         <div className="absolute inset-0 bg-grid-white/[0.02] bg-[size:3rem_3rem]" />
         <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent" />
         
         <div className="container mx-auto px-4 md:px-6 lg:px-8 relative">
-          {/* Section Title */}
           <div className="text-center mb-16">
             <h2 className="text-3xl md:text-4xl font-bold text-white mb-4">
-              Why Choose <span className="text-pink-500">NailEdge AI</span>
+              Experience <span className="text-pink-500">NailEdge AI</span>
             </h2>
             <p className="text-gray-400 max-w-2xl mx-auto">
-              Experience the future of nail design with our cutting-edge AI technology
+              Try on nail designs instantly with our advanced AI technology
             </p>
           </div>
 
-          {/* Features Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 md:gap-12 mb-24">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 md:gap-12">
             {[
               {
-                title: 'Fast Processing',
-                description: 'Advanced AI processing in seconds',
-                icon: 'M13 10V3L4 14h7v7l9-11h-7z'
+                title: 'Real-Time Preview',
+                description: 'See designs on your nails instantly',
+                icon: 'M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z'
               },
               {
-                title: 'High Accuracy',
-                description: '99.9% accurate results',
-                icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z'
+                title: 'Multiple Designs',
+                description: 'Choose from various nail art styles',
+                icon: 'M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z'
               },
               {
-                title: 'Secure Analysis',
-                description: 'End-to-end encryption',
-                icon: 'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z'
+                title: 'Easy to Use',
+                description: 'No special skills required',
+                icon: 'M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z'
               }
             ].map((feature, index) => (
-              <div key={index} className="group relative overflow-hidden rounded-3xl bg-white/[0.02] p-8 hover:bg-white/[0.05] transition-colors duration-300">
+              <div 
+                key={index} 
+                className="group relative overflow-hidden rounded-3xl bg-white/[0.02] p-8 hover:bg-white/[0.05] transition-all duration-300 hover:-translate-y-1"
+              >
                 <div className="absolute top-0 left-0 h-1 w-full bg-gradient-to-r from-pink-500 to-purple-500 transform origin-left scale-x-0 group-hover:scale-x-100 transition-transform duration-500" />
                 <div className="w-16 h-16 mb-6 bg-pink-500/20 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
                   <svg className="w-8 h-8 text-pink-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -118,23 +119,6 @@ const HomePage = () => {
               </div>
             ))}
           </div>
-
-          {/* Stats Grid */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-8 pt-12 border-t border-white/10">
-            {[
-              { label: 'Users', value: '100K+' },
-              { label: 'Scans', value: '100K+' },
-              { label: 'Accuracy', value: '99.9%' },
-              { label: 'Countries', value: '100K+' }
-            ].map((stat, index) => (
-              <div key={index} className="text-center group">
-                <h4 className="text-5xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-pink-500 to-purple-500 mb-2 transform group-hover:scale-110 transition-transform duration-300">
-                  {stat.value}
-                </h4>
-                <p className="text-gray-400 font-medium uppercase tracking-wider text-sm">{stat.label}</p>
-              </div>
-            ))}
-          </div>
         </div>
       </section>
     </>
@@ -142,7 +126,4 @@ const HomePage = () => {
 };
 
 export default HomePage;
-        
-
-
-
+            
