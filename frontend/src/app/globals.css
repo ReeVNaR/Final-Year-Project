@@ -678,3 +678,20 @@ section {
   pointer-events: none;
   z-index: 50;
 }
+
+/* Safe area padding for mobile notch/home bar */
+.safe-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Prevent accidental pinch-to-zoom on camera view */
+.touch-none {
+  touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}

@@ -24,18 +24,18 @@ class CameraErrorBoundary extends React.Component {
   render() {
     if (this.state.hasError) {
       return (
-        <div className="flex items-center justify-center min-h-screen bg-black text-white">
-          <div className="text-center max-w-md mx-auto px-6">
-            <div className="w-16 h-16 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-pink-500/20 to-purple-500/20 flex items-center justify-center">
-              <svg className="w-8 h-8 text-pink-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div className="flex items-center justify-center min-h-[100dvh] bg-black text-white px-6">
+          <div className="text-center max-w-sm mx-auto">
+            <div className="w-14 h-14 mx-auto mb-5 rounded-2xl bg-gradient-to-br from-pink-500/20 to-purple-500/20 flex items-center justify-center">
+              <svg className="w-7 h-7 text-pink-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
               </svg>
             </div>
-            <h2 className="text-xl font-semibold mb-2">Camera initialization failed</h2>
-            <p className="text-gray-500 text-sm mb-6">{this.state.errorMsg || 'Something went wrong with the camera.'}</p>
+            <h2 className="text-lg font-semibold mb-2">Camera Error</h2>
+            <p className="text-gray-500 text-sm mb-5">{this.state.errorMsg || 'Something went wrong.'}</p>
             <button
               onClick={() => this.setState({ hasError: false })}
-              className="px-8 py-3 bg-gradient-to-r from-pink-600 to-purple-600 rounded-full text-sm font-medium hover:from-pink-500 hover:to-purple-500 transition-all"
+              className="px-6 py-2.5 bg-gradient-to-r from-pink-600 to-purple-600 rounded-full text-sm font-medium"
             >
               Try Again
             </button>
@@ -62,35 +62,37 @@ function CameraView() {
   const nailImageRef = useRef(null);
   const cameraRef = useRef(null);
   const handsRef = useRef(null);
+  const setupInProgress = useRef(false);
 
   const [error, setError] = useState(null);
   const [imageLoaded, setImageLoaded] = useState(false);
   const [selectedDesign, setSelectedDesign] = useState(NAIL_DESIGNS[0]);
-  const [facingMode, setFacingMode] = useState('user');
+  const [useFrontCamera, setUseFrontCamera] = useState(true);
   const [isCameraReady, setIsCameraReady] = useState(false);
   const [isSwitching, setIsSwitching] = useState(false);
   const [isModelLoading, setIsModelLoading] = useState(true);
   const [nailSize, setNailSize] = useState(62);
   const [handsDetected, setHandsDetected] = useState(false);
   const [showDesignPanel, setShowDesignPanel] = useState(false);
+  const [availableCameras, setAvailableCameras] = useState([]);
+  const [currentCameraIdx, setCurrentCameraIdx] = useState(0);
 
   // Load nail image
   const loadNailImage = useCallback(async (design) => {
     setImageLoaded(false);
-    const img = new Image();
+    const img = new window.Image();
     img.crossOrigin = 'anonymous';
     img.src = design.image;
-
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       img.onload = () => {
         nailImageRef.current = img;
         setImageLoaded(true);
         resolve();
       };
-      img.onerror = (err) => {
-        console.error('Error loading nail image:', err);
+      img.onerror = () => {
+        console.error('Failed to load nail image:', design.image);
         setImageLoaded(true);
-        reject(err);
+        resolve();
       };
     });
   }, []);
@@ -100,215 +102,274 @@ function CameraView() {
     const hands = new Hands({
       locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
     });
-
     await hands.setOptions({
       maxNumHands: 2,
       modelComplexity: 1,
       minDetectionConfidence: 0.6,
       minTrackingConfidence: 0.5,
     });
-
     return hands;
   }, []);
 
   // Stop camera and clean up
   const stopCurrentCamera = useCallback(async () => {
-    if (videoRef.current?.srcObject) {
-      videoRef.current.srcObject.getTracks().forEach((t) => t.stop());
-      videoRef.current.srcObject = null;
-    }
-    if (cameraRef.current) {
-      try { cameraRef.current.stop(); } catch (_) { }
-      cameraRef.current = null;
-    }
-    if (handsRef.current) {
-      try { await handsRef.current.close(); } catch (_) { }
-      handsRef.current = null;
+    try {
+      if (cameraRef.current) {
+        cameraRef.current.stop();
+        cameraRef.current = null;
+      }
+    } catch (_) { }
+    try {
+      if (videoRef.current?.srcObject) {
+        videoRef.current.srcObject.getTracks().forEach((t) => t.stop());
+        videoRef.current.srcObject = null;
+      }
+    } catch (_) { }
+    try {
+      if (handsRef.current) {
+        await handsRef.current.close();
+        handsRef.current = null;
+      }
+    } catch (_) { }
+  }, []);
+
+  // Process results — draw nails
+  const onResults = useCallback(
+    (results) => {
+      if (!isMounted.current || !videoRef.current || !canvasRef.current) return;
+      const canvas = canvasRef.current;
+      const ctx = canvas.getContext('2d');
+      const width = videoRef.current.videoWidth;
+      const height = videoRef.current.videoHeight;
+      if (!width || !height) return;
+
+      canvas.width = width;
+      canvas.height = height;
+      ctx.save();
+      ctx.clearRect(0, 0, width, height);
+      ctx.drawImage(results.image, 0, 0, width, height);
+
+      if (results.multiHandLandmarks?.length > 0) {
+        setHandsDetected(true);
+        if (nailImageRef.current) {
+          for (const [idx, landmarks] of results.multiHandLandmarks.entries()) {
+            const handedness = results.multiHandedness[idx].label;
+            const wrist = landmarks[0];
+            const index_tip = landmarks[8];
+            const middle = landmarks[12];
+            const pinky = landmarks[20];
+
+            const v1 = { x: middle.x - wrist.x, y: middle.y - wrist.y, z: middle.z - wrist.z };
+            const v2 = { x: pinky.x - index_tip.x, y: pinky.y - index_tip.y, z: pinky.z - index_tip.z };
+            const normal_z = v1.x * v2.y - v1.y * v2.x;
+            const isPalmAway = handedness === 'Left' ? normal_z > 0 : normal_z < 0;
+
+            if (isPalmAway) {
+              [4, 8, 12, 16, 20].forEach((tipIndex) => {
+                const tip = landmarks[tipIndex];
+                const joint = landmarks[tipIndex - 1];
+                const x = tip.x * width;
+                const y = tip.y * height;
+                const jx = joint.x * width;
+                const jy = joint.y * height;
+                const fingerWidth = Math.sqrt((x - jx) ** 2 + (y - jy) ** 2);
+                const sz = Math.min(fingerWidth * 1.2, nailSize);
+                const angle = Math.atan2(joint.y - tip.y, joint.x - tip.x);
+
+                ctx.save();
+                ctx.translate(x, y);
+                ctx.rotate(angle - Math.PI / 2);
+                ctx.drawImage(nailImageRef.current, -sz / 2, -sz / 2 - sz * 0.2, sz, sz);
+                ctx.restore();
+              });
+            }
+          }
+        }
+      } else {
+        setHandsDetected(false);
+      }
+      ctx.restore();
+    },
+    [nailSize]
+  );
+
+  // Enumerate cameras
+  const enumerateCameras = useCallback(async () => {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoDevices = devices.filter((d) => d.kind === 'videoinput');
+      setAvailableCameras(videoDevices);
+      return videoDevices;
+    } catch (err) {
+      console.error('Could not enumerate cameras:', err);
+      return [];
     }
   }, []);
 
-  // Process hand tracking results and draw nails
-  const onResults = useCallback((results) => {
-    if (!isMounted.current || !videoRef.current || !canvasRef.current) return;
+  // Setup camera
+  const setupCamera = useCallback(
+    async (cameraIndex, front) => {
+      if (!isMounted.current || setupInProgress.current) return;
+      setupInProgress.current = true;
 
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    const width = videoRef.current.videoWidth;
-    const height = videoRef.current.videoHeight;
-    if (!width || !height) return;
+      try {
+        await stopCurrentCamera();
+        setIsCameraReady(false);
+        setIsModelLoading(true);
+        setError(null);
 
-    canvas.width = width;
-    canvas.height = height;
-
-    ctx.save();
-    ctx.clearRect(0, 0, width, height);
-    ctx.drawImage(results.image, 0, 0, width, height);
-
-    if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-      setHandsDetected(true);
-
-      if (nailImageRef.current) {
-        for (const [index, landmarks] of results.multiHandLandmarks.entries()) {
-          const handedness = results.multiHandedness[index].label;
-
-          // Palm orientation detection
-          const wrist = landmarks[0];
-          const index_tip = landmarks[8];
-          const middle = landmarks[12];
-          const pinky = landmarks[20];
-
-          const v1 = {
-            x: middle.x - wrist.x,
-            y: middle.y - wrist.y,
-            z: middle.z - wrist.z,
-          };
-          const v2 = {
-            x: pinky.x - index_tip.x,
-            y: pinky.y - index_tip.y,
-            z: pinky.z - index_tip.z,
-          };
-
-          // Cross product for palm normal
-          const normal_z = v1.x * v2.y - v1.y * v2.x;
-          const isPalmAway = handedness === 'Left' ? normal_z > 0 : normal_z < 0;
-
-          if (isPalmAway) {
-            const fingertips = [4, 8, 12, 16, 20];
-            fingertips.forEach((tipIndex) => {
-              const tip = landmarks[tipIndex];
-              const joint = landmarks[tipIndex - 1];
-              const x = tip.x * width;
-              const y = tip.y * height;
-              const jx = joint.x * width;
-              const jy = joint.y * height;
-
-              const fingerWidth = Math.sqrt((x - jx) ** 2 + (y - jy) ** 2);
-              const currentNailSize = Math.min(fingerWidth * 1.2, nailSize);
-              const angle = Math.atan2(joint.y - tip.y, joint.x - tip.x);
-
-              ctx.save();
-              ctx.translate(x, y);
-              ctx.rotate(angle - Math.PI / 2);
-              ctx.drawImage(
-                nailImageRef.current,
-                -currentNailSize / 2,
-                -currentNailSize / 2 - currentNailSize * 0.2,
-                currentNailSize,
-                currentNailSize
-              );
-              ctx.restore();
+        // First get a stream to trigger permission, then enumerate
+        let stream;
+        try {
+          // Try with specific camera if available
+          const cameras = await enumerateCameras();
+          if (cameras.length > 0 && cameras[cameraIndex]) {
+            stream = await navigator.mediaDevices.getUserMedia({
+              audio: false,
+              video: {
+                deviceId: { exact: cameras[cameraIndex].deviceId },
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+              },
+            });
+          } else {
+            // Fallback to facingMode
+            stream = await navigator.mediaDevices.getUserMedia({
+              audio: false,
+              video: {
+                facingMode: front ? 'user' : 'environment',
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+              },
             });
           }
+        } catch (firstErr) {
+          // Final fallback — any camera
+          console.warn('Specific camera failed, trying any camera:', firstErr);
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+          });
         }
+
+        if (!isMounted.current) {
+          stream.getTracks().forEach((t) => t.stop());
+          setupInProgress.current = false;
+          return;
+        }
+
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await new Promise((resolve) => {
+            videoRef.current.onloadedmetadata = () => {
+              const track = stream.getVideoTracks()[0];
+              const settings = track.getSettings();
+              if (canvasRef.current) {
+                canvasRef.current.width = settings.width || 1280;
+                canvasRef.current.height = settings.height || 720;
+              }
+              resolve();
+            };
+          });
+        }
+
+        // Re-enumerate after getting permission
+        await enumerateCameras();
+
+        const hands = await initializeHands();
+        await hands.initialize();
+
+        if (!isMounted.current) {
+          hands.close();
+          setupInProgress.current = false;
+          return;
+        }
+
+        handsRef.current = hands;
+        hands.onResults(onResults);
+        setIsModelLoading(false);
+
+        const camera = new Camera(videoRef.current, {
+          onFrame: async () => {
+            if (handsRef.current && isMounted.current && videoRef.current?.readyState === 4) {
+              try {
+                await handsRef.current.send({ image: videoRef.current });
+              } catch (err) {
+                if (!err.message?.includes('already deleted')) {
+                  console.error('Hand detection error:', err);
+                }
+              }
+            }
+          },
+        });
+
+        cameraRef.current = camera;
+        await camera.start();
+        setIsCameraReady(true);
+      } catch (err) {
+        console.error('Camera setup error:', err);
+        setIsModelLoading(false);
+        if (err.name === 'NotAllowedError') {
+          setError('Camera permission denied. Please allow camera access in your browser settings.');
+        } else if (err.name === 'NotFoundError') {
+          setError('No camera found on this device.');
+        } else if (err.name === 'NotReadableError') {
+          setError('Camera is being used by another app. Please close other apps using the camera.');
+        } else {
+          setError('Failed to start camera. Please refresh and try again.');
+        }
+      } finally {
+        setupInProgress.current = false;
       }
-    } else {
-      setHandsDetected(false);
-    }
+    },
+    [stopCurrentCamera, initializeHands, onResults, enumerateCameras]
+  );
 
-    ctx.restore();
-  }, [nailSize]);
-
-  // Setup camera
-  const setupCamera = useCallback(async () => {
-    if (!isMounted.current) return;
+  // Toggle camera — properly cycle through devices on mobile
+  const toggleCamera = useCallback(async () => {
+    if (isSwitching || setupInProgress.current) return;
+    setIsSwitching(true);
+    setIsCameraReady(false);
 
     try {
       await stopCurrentCamera();
-      setIsCameraReady(false);
-      setIsModelLoading(true);
-      setError(null);
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: { facingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
-      });
+      // Wait for cleanup
+      await new Promise((r) => setTimeout(r, 300));
 
-      if (!isMounted.current) {
-        stream.getTracks().forEach((t) => t.stop());
-        return;
+      const cameras = await enumerateCameras();
+      let nextIdx;
+
+      if (cameras.length > 1) {
+        // Cycle through available cameras
+        nextIdx = (currentCameraIdx + 1) % cameras.length;
+        setCurrentCameraIdx(nextIdx);
+        setUseFrontCamera(!useFrontCamera);
+      } else {
+        // Only one camera — toggle facingMode (for some mobile browsers)
+        nextIdx = 0;
+        setUseFrontCamera(!useFrontCamera);
       }
 
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await new Promise((resolve) => {
-          videoRef.current.onloadedmetadata = () => {
-            const track = stream.getVideoTracks()[0];
-            const settings = track.getSettings();
-            if (canvasRef.current) {
-              canvasRef.current.width = settings.width || 1280;
-              canvasRef.current.height = settings.height || 720;
-            }
-            resolve();
-          };
-        });
-      }
-
-      const hands = await initializeHands();
-      await hands.initialize();
-
-      if (!isMounted.current) {
-        hands.close();
-        return;
-      }
-
-      handsRef.current = hands;
-      hands.onResults(onResults);
-      setIsModelLoading(false);
-
-      const camera = new Camera(videoRef.current, {
-        onFrame: async () => {
-          if (handsRef.current && isMounted.current && videoRef.current?.readyState === 4) {
-            try {
-              await handsRef.current.send({ image: videoRef.current });
-            } catch (err) {
-              if (!err.message?.includes('already deleted')) {
-                console.error('Hand detection error:', err);
-              }
-            }
-          }
-        },
-      });
-
-      cameraRef.current = camera;
-      await camera.start();
-      setIsCameraReady(true);
+      await setupCamera(nextIdx, !useFrontCamera);
     } catch (err) {
-      console.error('Camera setup error:', err);
-      setIsModelLoading(false);
-      setError(
-        err.name === 'NotAllowedError'
-          ? 'Camera permission was denied. Please allow camera access and try again.'
-          : err.name === 'NotFoundError'
-            ? 'No camera found on this device.'
-            : 'Failed to initialize camera. Please refresh and try again.'
-      );
+      console.error('Error switching camera:', err);
+      setError('Failed to switch camera. Please try again.');
+    } finally {
+      setIsSwitching(false);
     }
-  }, [facingMode, stopCurrentCamera, initializeHands, onResults]);
-
-  // Toggle front/back camera
-  const toggleCamera = useCallback(async () => {
-    setIsSwitching(true);
-    setIsCameraReady(false);
-    setFacingMode((prev) => (prev === 'user' ? 'environment' : 'user'));
-  }, []);
+  }, [isSwitching, currentCameraIdx, useFrontCamera, stopCurrentCamera, enumerateCameras, setupCamera]);
 
   // Init on mount
   useEffect(() => {
     isMounted.current = true;
     loadNailImage(NAIL_DESIGNS[0]);
-    setupCamera();
+    setupCamera(0, true);
     return () => {
       isMounted.current = false;
       stopCurrentCamera();
     };
   }, []);
-
-  // Re-setup camera when facingMode changes (from toggle)
-  useEffect(() => {
-    if (isSwitching) {
-      setupCamera().finally(() => setIsSwitching(false));
-    }
-  }, [facingMode]);
 
   // Reload nail image when design changes
   useEffect(() => {
@@ -319,52 +380,64 @@ function CameraView() {
     setNailSize((prev) => Math.max(24, Math.min(120, prev + delta)));
   };
 
+  // Capture screenshot
+  const captureScreenshot = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const link = document.createElement('a');
+    link.download = `nailedge-tryon-${Date.now()}.png`;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+  };
+
   return (
-    <div className="relative min-h-screen bg-black overflow-hidden">
+    <div className="relative w-full h-[100dvh] bg-black overflow-hidden touch-none">
       {/* Camera feed */}
       <div className="absolute inset-0">
         <video ref={videoRef} className="absolute w-full h-full object-cover" autoPlay playsInline muted />
         <canvas ref={canvasRef} className="absolute w-full h-full object-cover" />
       </div>
 
-      {/* Top bar */}
-      <div className="absolute top-0 left-0 right-0 z-30 p-4 flex items-center justify-between">
-        <Link
-          href="/"
-          className="flex items-center gap-2 px-4 py-2.5 rounded-full glass text-white text-sm font-medium hover:bg-white/10 transition-all"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-          </svg>
-          Back
-        </Link>
+      {/* Top bar — safe area aware */}
+      <div className="absolute top-0 left-0 right-0 z-30 safe-top">
+        <div className="flex items-center justify-between p-3 sm:p-4">
+          <Link
+            href="/"
+            className="flex items-center gap-1.5 px-3 py-2 sm:px-4 sm:py-2.5 rounded-full bg-black/40 backdrop-blur-xl text-white text-xs sm:text-sm font-medium active:scale-95 transition-transform"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+            <span className="hidden sm:inline">Back</span>
+          </Link>
 
-        {/* Status indicator */}
-        <div className="flex items-center gap-2 px-4 py-2.5 rounded-full glass">
-          <span className={`w-2 h-2 rounded-full ${handsDetected ? 'bg-green-500 animate-pulse' : isCameraReady ? 'bg-yellow-500' : 'bg-red-500'}`} />
-          <span className="text-white/80 text-xs font-medium">
-            {isModelLoading ? 'Loading AI...' : handsDetected ? 'Hands Detected' : isCameraReady ? 'Show Your Hands' : 'Initializing...'}
-          </span>
+          {/* Status */}
+          <div className="flex items-center gap-1.5 px-3 py-2 sm:px-4 sm:py-2.5 rounded-full bg-black/40 backdrop-blur-xl">
+            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${handsDetected ? 'bg-green-500 animate-pulse' : isCameraReady ? 'bg-yellow-500' : 'bg-red-500'}`} />
+            <span className="text-white/80 text-[11px] sm:text-xs font-medium whitespace-nowrap">
+              {isModelLoading ? 'Loading AI...' : handsDetected ? 'Hands Detected' : isCameraReady ? 'Show Hands' : 'Starting...'}
+            </span>
+          </div>
         </div>
       </div>
 
       {/* Design selector toggle */}
       <button
         onClick={() => setShowDesignPanel(!showDesignPanel)}
-        className="absolute bottom-24 left-1/2 -translate-x-1/2 z-30 px-5 py-2.5 rounded-full glass text-white text-sm font-medium flex items-center gap-2 hover:bg-white/10 transition-all"
+        className="absolute bottom-[88px] sm:bottom-24 left-1/2 -translate-x-1/2 z-30 px-4 py-2 sm:px-5 sm:py-2.5 rounded-full bg-black/40 backdrop-blur-xl text-white text-xs sm:text-sm font-medium flex items-center gap-2 active:scale-95 transition-transform"
       >
-        <div className="w-5 h-5 rounded-full border-2 border-current" style={{ backgroundColor: selectedDesign.color }} />
+        <div className="w-4 h-4 sm:w-5 sm:h-5 rounded-full border-2 border-white/30 flex-shrink-0" style={{ backgroundColor: selectedDesign.color }} />
         {selectedDesign.name}
-        <svg className={`w-4 h-4 transition-transform ${showDesignPanel ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg className={`w-3.5 h-3.5 transition-transform ${showDesignPanel ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
         </svg>
       </button>
 
       {/* Design panel */}
       {showDesignPanel && (
-        <div className="absolute bottom-36 left-1/2 -translate-x-1/2 z-30 glass-strong rounded-2xl p-4 animate-fade-in">
-          <p className="text-white/50 text-[10px] uppercase tracking-[0.2em] mb-3 text-center">Nail Designs</p>
-          <div className="flex gap-3">
+        <div className="absolute bottom-[130px] sm:bottom-36 left-1/2 -translate-x-1/2 z-30 bg-black/60 backdrop-blur-2xl border border-white/10 rounded-2xl p-3 sm:p-4 animate-fade-in w-[calc(100vw-2rem)] max-w-xs">
+          <p className="text-white/40 text-[10px] uppercase tracking-[0.2em] mb-2.5 text-center font-medium">Nail Designs</p>
+          <div className="flex justify-center gap-2 sm:gap-3">
             {NAIL_DESIGNS.map((design) => (
               <button
                 key={design.id}
@@ -372,97 +445,90 @@ function CameraView() {
                   setSelectedDesign(design);
                   setShowDesignPanel(false);
                 }}
-                className={`flex flex-col items-center gap-2 p-3 rounded-xl transition-all ${selectedDesign.id === design.id
-                    ? 'bg-pink-500/20 ring-1 ring-pink-500/50'
-                    : 'hover:bg-white/5'
+                className={`flex flex-col items-center gap-1.5 p-2 sm:p-3 rounded-xl transition-all active:scale-95 ${selectedDesign.id === design.id ? 'bg-pink-500/20 ring-1 ring-pink-500/50' : 'hover:bg-white/5'
                   }`}
               >
                 <div
-                  className="w-12 h-12 rounded-xl overflow-hidden border-2 transition-all"
+                  className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl overflow-hidden border-2 transition-all"
                   style={{ borderColor: selectedDesign.id === design.id ? '#ec4899' : 'rgba(255,255,255,0.1)' }}
                 >
                   <img src={design.image} alt={design.name} className="w-full h-full object-contain bg-white/5" />
                 </div>
-                <span className="text-white text-xs font-medium">{design.name}</span>
+                <span className="text-white text-[11px] sm:text-xs font-medium">{design.name}</span>
               </button>
             ))}
           </div>
         </div>
       )}
 
-      {/* Bottom controls */}
-      <div className="absolute bottom-4 left-0 right-0 z-30 px-4">
-        <div className="max-w-lg mx-auto flex items-center justify-between gap-3">
-          {/* Size controls */}
-          <div className="flex items-center gap-2 px-3 py-2 rounded-full glass">
-            <button
-              onClick={() => handleNailSizeChange(-4)}
-              className="w-8 h-8 rounded-full bg-white/10 text-white hover:bg-white/20 transition-colors flex items-center justify-center text-lg font-light"
-            >
-              −
-            </button>
-            <span className="text-white/60 text-xs w-8 text-center">{nailSize}</span>
-            <button
-              onClick={() => handleNailSizeChange(4)}
-              className="w-8 h-8 rounded-full bg-white/10 text-white hover:bg-white/20 transition-colors flex items-center justify-center text-lg font-light"
-            >
-              +
-            </button>
-          </div>
+      {/* Bottom controls — safe area aware */}
+      <div className="absolute bottom-0 left-0 right-0 z-30 safe-bottom">
+        <div className="px-3 sm:px-4 pb-3 sm:pb-4">
+          <div className="max-w-lg mx-auto flex items-center justify-between gap-2 sm:gap-3">
+            {/* Size controls */}
+            <div className="flex items-center gap-1.5 px-2.5 py-2 rounded-full bg-black/40 backdrop-blur-xl">
+              <button
+                onClick={() => handleNailSizeChange(-4)}
+                className="w-8 h-8 rounded-full bg-white/10 text-white active:bg-white/30 transition-colors flex items-center justify-center text-base font-light"
+              >
+                −
+              </button>
+              <span className="text-white/50 text-[11px] w-6 text-center tabular-nums">{nailSize}</span>
+              <button
+                onClick={() => handleNailSizeChange(4)}
+                className="w-8 h-8 rounded-full bg-white/10 text-white active:bg-white/30 transition-colors flex items-center justify-center text-base font-light"
+              >
+                +
+              </button>
+            </div>
 
-          {/* Switch camera */}
-          <button
-            onClick={toggleCamera}
-            disabled={!isCameraReady || isSwitching}
-            className={`px-6 py-3 rounded-full text-sm font-medium transition-all ${isCameraReady && !isSwitching
-                ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white hover:from-pink-500 hover:to-purple-500 hover:scale-105 hover:shadow-lg hover:shadow-pink-500/20'
-                : 'bg-white/10 text-white/40 cursor-not-allowed'
-              }`}
-          >
-            <span className="flex items-center gap-2">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-              {isSwitching ? 'Switching...' : 'Flip Camera'}
-            </span>
-          </button>
-
-          {/* Capture button placeholder */}
-          <div className="flex items-center gap-2 px-3 py-2 rounded-full glass">
+            {/* Flip camera — larger tap target on mobile */}
             <button
-              onClick={() => {
-                const canvas = canvasRef.current;
-                if (!canvas) return;
-                const link = document.createElement('a');
-                link.download = `nailedge-tryon-${Date.now()}.png`;
-                link.href = canvas.toDataURL('image/png');
-                link.click();
-              }}
-              className="w-8 h-8 rounded-full bg-white/10 text-white hover:bg-white/20 transition-colors flex items-center justify-center"
-              title="Capture"
+              onClick={toggleCamera}
+              disabled={!isCameraReady || isSwitching}
+              className={`flex-shrink-0 px-5 py-2.5 sm:px-6 sm:py-3 rounded-full text-xs sm:text-sm font-medium transition-all active:scale-95 ${isCameraReady && !isSwitching
+                  ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-lg shadow-pink-500/20'
+                  : 'bg-white/10 text-white/30 cursor-not-allowed'
+                }`}
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
+              <span className="flex items-center gap-1.5">
+                <svg className={`w-4 h-4 ${isSwitching ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                {isSwitching ? 'Flipping...' : 'Flip'}
+              </span>
             </button>
+
+            {/* Capture */}
+            <div className="flex items-center px-2.5 py-2 rounded-full bg-black/40 backdrop-blur-xl">
+              <button
+                onClick={captureScreenshot}
+                className="w-9 h-9 rounded-full bg-white/10 text-white active:bg-white/30 transition-colors flex items-center justify-center"
+                title="Capture"
+              >
+                <svg className="w-4.5 h-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
       </div>
 
       {/* Loading overlay */}
       {isModelLoading && (
-        <div className="absolute inset-0 z-40 bg-black/80 flex items-center justify-center">
+        <div className="absolute inset-0 z-40 bg-black/80 flex items-center justify-center px-6">
           <div className="text-center">
-            <div className="w-16 h-16 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-pink-500 to-purple-600 flex items-center justify-center animate-pulse">
-              <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className="w-14 h-14 mx-auto mb-5 rounded-2xl bg-gradient-to-br from-pink-500 to-purple-600 flex items-center justify-center animate-pulse">
+              <svg className="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
               </svg>
             </div>
-            <p className="text-white font-semibold mb-2">Loading AI Model</p>
-            <p className="text-gray-500 text-sm">Setting up hand detection...</p>
-            <div className="mt-4 w-32 mx-auto h-1 bg-white/10 rounded-full overflow-hidden">
-              <div className="h-full bg-gradient-to-r from-pink-500 to-purple-600 rounded-full animate-shimmer" style={{ width: '60%' }} />
+            <p className="text-white font-semibold text-sm sm:text-base mb-1.5">Loading AI Model</p>
+            <p className="text-gray-500 text-xs sm:text-sm">Setting up hand detection...</p>
+            <div className="mt-4 w-28 mx-auto h-1 bg-white/10 rounded-full overflow-hidden">
+              <div className="h-full bg-gradient-to-r from-pink-500 to-purple-600 rounded-full w-3/5 animate-pulse" />
             </div>
           </div>
         </div>
@@ -470,27 +536,35 @@ function CameraView() {
 
       {/* Error overlay */}
       {error && (
-        <div className="absolute inset-0 z-40 bg-black/80 flex items-center justify-center px-6">
-          <div className="glass-strong rounded-3xl p-8 max-w-sm w-full text-center">
-            <div className="w-14 h-14 mx-auto mb-5 rounded-2xl bg-red-500/10 flex items-center justify-center">
-              <svg className="w-7 h-7 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div className="absolute inset-0 z-40 bg-black/80 flex items-center justify-center px-4">
+          <div className="bg-zinc-900/90 backdrop-blur-2xl border border-white/10 rounded-2xl sm:rounded-3xl p-6 sm:p-8 max-w-sm w-full text-center">
+            <div className="w-12 h-12 mx-auto mb-4 rounded-xl bg-red-500/10 flex items-center justify-center">
+              <svg className="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
               </svg>
             </div>
-            <h3 className="text-white font-semibold text-lg mb-2">Camera Error</h3>
-            <p className="text-gray-400 text-sm mb-6 leading-relaxed">{error}</p>
-            <button
-              onClick={() => {
-                setError(null);
-                setupCamera();
-              }}
-              className="w-full py-3 bg-gradient-to-r from-pink-600 to-purple-600 rounded-full text-white font-medium text-sm hover:from-pink-500 hover:to-purple-500 transition-all"
-            >
-              Try Again
-            </button>
+            <h3 className="text-white font-semibold text-base mb-1.5">Camera Error</h3>
+            <p className="text-gray-400 text-xs sm:text-sm mb-5 leading-relaxed">{error}</p>
+            <div className="flex flex-col gap-2.5">
+              <button
+                onClick={() => {
+                  setError(null);
+                  setupCamera(currentCameraIdx, useFrontCamera);
+                }}
+                className="w-full py-2.5 bg-gradient-to-r from-pink-600 to-purple-600 rounded-full text-white font-medium text-sm active:scale-95 transition-transform"
+              >
+                Try Again
+              </button>
+              <Link href="/" className="w-full py-2.5 bg-white/5 rounded-full text-white/60 font-medium text-sm text-center active:scale-95 transition-transform">
+                Go Home
+              </Link>
+            </div>
           </div>
         </div>
       )}
+
+      {/* Close design panel when tapping outside */}
+      {showDesignPanel && <div className="absolute inset-0 z-20" onClick={() => setShowDesignPanel(false)} />}
     </div>
   );
 }
