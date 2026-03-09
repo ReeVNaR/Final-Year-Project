@@ -63,19 +63,17 @@ function CameraView() {
   const cameraRef = useRef(null);
   const handsRef = useRef(null);
   const setupInProgress = useRef(false);
+  const facingModeRef = useRef('user'); // ref to avoid stale closures
 
   const [error, setError] = useState(null);
   const [imageLoaded, setImageLoaded] = useState(false);
   const [selectedDesign, setSelectedDesign] = useState(NAIL_DESIGNS[0]);
-  const [useFrontCamera, setUseFrontCamera] = useState(true);
   const [isCameraReady, setIsCameraReady] = useState(false);
   const [isSwitching, setIsSwitching] = useState(false);
   const [isModelLoading, setIsModelLoading] = useState(true);
   const [nailSize, setNailSize] = useState(62);
   const [handsDetected, setHandsDetected] = useState(false);
   const [showDesignPanel, setShowDesignPanel] = useState(false);
-  const [availableCameras, setAvailableCameras] = useState([]);
-  const [currentCameraIdx, setCurrentCameraIdx] = useState(0);
 
   // Load nail image
   const loadNailImage = useCallback(async (design) => {
@@ -193,24 +191,13 @@ function CameraView() {
     [nailSize]
   );
 
-  // Enumerate cameras
-  const enumerateCameras = useCallback(async () => {
-    try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const videoDevices = devices.filter((d) => d.kind === 'videoinput');
-      setAvailableCameras(videoDevices);
-      return videoDevices;
-    } catch (err) {
-      console.error('Could not enumerate cameras:', err);
-      return [];
-    }
-  }, []);
-
-  // Setup camera
+  // Setup camera — uses facingModeRef for iOS compatibility
   const setupCamera = useCallback(
-    async (cameraIndex, front) => {
+    async (mode) => {
       if (!isMounted.current || setupInProgress.current) return;
       setupInProgress.current = true;
+
+      const facing = mode || facingModeRef.current;
 
       try {
         await stopCurrentCamera();
@@ -218,38 +205,38 @@ function CameraView() {
         setIsModelLoading(true);
         setError(null);
 
-        // First get a stream to trigger permission, then enumerate
         let stream;
+
+        // Strategy 1: Use exact facingMode (required for iOS WebKit)
         try {
-          // Try with specific camera if available
-          const cameras = await enumerateCameras();
-          if (cameras.length > 0 && cameras[cameraIndex]) {
-            stream = await navigator.mediaDevices.getUserMedia({
-              audio: false,
-              video: {
-                deviceId: { exact: cameras[cameraIndex].deviceId },
-                width: { ideal: 1280 },
-                height: { ideal: 720 },
-              },
-            });
-          } else {
-            // Fallback to facingMode
-            stream = await navigator.mediaDevices.getUserMedia({
-              audio: false,
-              video: {
-                facingMode: front ? 'user' : 'environment',
-                width: { ideal: 1280 },
-                height: { ideal: 720 },
-              },
-            });
-          }
-        } catch (firstErr) {
-          // Final fallback — any camera
-          console.warn('Specific camera failed, trying any camera:', firstErr);
           stream = await navigator.mediaDevices.getUserMedia({
             audio: false,
-            video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+            video: {
+              facingMode: { exact: facing },
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            },
           });
+        } catch (exactErr) {
+          console.warn(`Exact facingMode "${facing}" failed, trying preference:`, exactErr.message);
+          // Strategy 2: Use facingMode as preference
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({
+              audio: false,
+              video: {
+                facingMode: facing,
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+              },
+            });
+          } catch (prefErr) {
+            console.warn('Preference facingMode failed, trying any camera:', prefErr.message);
+            // Strategy 3: Any camera
+            stream = await navigator.mediaDevices.getUserMedia({
+              audio: false,
+              video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+            });
+          }
         }
 
         if (!isMounted.current) {
@@ -272,9 +259,6 @@ function CameraView() {
             };
           });
         }
-
-        // Re-enumerate after getting permission
-        await enumerateCameras();
 
         const hands = await initializeHands();
         await hands.initialize();
@@ -314,7 +298,7 @@ function CameraView() {
         } else if (err.name === 'NotFoundError') {
           setError('No camera found on this device.');
         } else if (err.name === 'NotReadableError') {
-          setError('Camera is being used by another app. Please close other apps using the camera.');
+          setError('Camera is being used by another app. Close other apps and try again.');
         } else {
           setError('Failed to start camera. Please refresh and try again.');
         }
@@ -322,49 +306,40 @@ function CameraView() {
         setupInProgress.current = false;
       }
     },
-    [stopCurrentCamera, initializeHands, onResults, enumerateCameras]
+    [stopCurrentCamera, initializeHands, onResults]
   );
 
-  // Toggle camera — properly cycle through devices on mobile
+  // Toggle camera — iOS-compatible using exact facingMode
   const toggleCamera = useCallback(async () => {
     if (isSwitching || setupInProgress.current) return;
     setIsSwitching(true);
     setIsCameraReady(false);
 
     try {
+      // Fully stop everything first
       await stopCurrentCamera();
 
-      // Wait for cleanup
-      await new Promise((r) => setTimeout(r, 300));
+      // Wait for iOS to fully release the camera hardware
+      await new Promise((r) => setTimeout(r, 500));
 
-      const cameras = await enumerateCameras();
-      let nextIdx;
+      // Toggle the facing mode using the ref (avoids stale closure)
+      const newMode = facingModeRef.current === 'user' ? 'environment' : 'user';
+      facingModeRef.current = newMode;
 
-      if (cameras.length > 1) {
-        // Cycle through available cameras
-        nextIdx = (currentCameraIdx + 1) % cameras.length;
-        setCurrentCameraIdx(nextIdx);
-        setUseFrontCamera(!useFrontCamera);
-      } else {
-        // Only one camera — toggle facingMode (for some mobile browsers)
-        nextIdx = 0;
-        setUseFrontCamera(!useFrontCamera);
-      }
-
-      await setupCamera(nextIdx, !useFrontCamera);
+      await setupCamera(newMode);
     } catch (err) {
       console.error('Error switching camera:', err);
       setError('Failed to switch camera. Please try again.');
     } finally {
       setIsSwitching(false);
     }
-  }, [isSwitching, currentCameraIdx, useFrontCamera, stopCurrentCamera, enumerateCameras, setupCamera]);
+  }, [isSwitching, stopCurrentCamera, setupCamera]);
 
   // Init on mount
   useEffect(() => {
     isMounted.current = true;
     loadNailImage(NAIL_DESIGNS[0]);
-    setupCamera(0, true);
+    setupCamera('user');
     return () => {
       isMounted.current = false;
       stopCurrentCamera();
@@ -435,28 +410,30 @@ function CameraView() {
 
       {/* Design panel */}
       {showDesignPanel && (
-        <div className="absolute bottom-[130px] sm:bottom-36 left-1/2 -translate-x-1/2 z-30 bg-black/60 backdrop-blur-2xl border border-white/10 rounded-2xl p-3 sm:p-4 animate-fade-in w-[calc(100vw-2rem)] max-w-xs">
-          <p className="text-white/40 text-[10px] uppercase tracking-[0.2em] mb-2.5 text-center font-medium">Nail Designs</p>
-          <div className="flex justify-center gap-2 sm:gap-3">
-            {NAIL_DESIGNS.map((design) => (
-              <button
-                key={design.id}
-                onClick={() => {
-                  setSelectedDesign(design);
-                  setShowDesignPanel(false);
-                }}
-                className={`flex flex-col items-center gap-1.5 p-2 sm:p-3 rounded-xl transition-all active:scale-95 ${selectedDesign.id === design.id ? 'bg-pink-500/20 ring-1 ring-pink-500/50' : 'hover:bg-white/5'
-                  }`}
-              >
-                <div
-                  className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl overflow-hidden border-2 transition-all"
-                  style={{ borderColor: selectedDesign.id === design.id ? '#ec4899' : 'rgba(255,255,255,0.1)' }}
+        <div className="absolute bottom-[130px] sm:bottom-36 left-4 right-4 z-30 flex justify-center animate-fade-in">
+          <div className="bg-black/60 backdrop-blur-2xl border border-white/10 rounded-2xl p-3 sm:p-4 w-full max-w-xs">
+            <p className="text-white/40 text-[10px] uppercase tracking-[0.2em] mb-2.5 text-center font-medium">Nail Designs</p>
+            <div className="flex justify-center gap-2 sm:gap-3">
+              {NAIL_DESIGNS.map((design) => (
+                <button
+                  key={design.id}
+                  onClick={() => {
+                    setSelectedDesign(design);
+                    setShowDesignPanel(false);
+                  }}
+                  className={`flex flex-col items-center gap-1.5 p-2 sm:p-3 rounded-xl transition-all active:scale-95 ${selectedDesign.id === design.id ? 'bg-pink-500/20 ring-1 ring-pink-500/50' : 'hover:bg-white/5'
+                    }`}
                 >
-                  <img src={design.image} alt={design.name} className="w-full h-full object-contain bg-white/5" />
-                </div>
-                <span className="text-white text-[11px] sm:text-xs font-medium">{design.name}</span>
-              </button>
-            ))}
+                  <div
+                    className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl overflow-hidden border-2 transition-all"
+                    style={{ borderColor: selectedDesign.id === design.id ? '#ec4899' : 'rgba(255,255,255,0.1)' }}
+                  >
+                    <img src={design.image} alt={design.name} className="w-full h-full object-contain bg-white/5" />
+                  </div>
+                  <span className="text-white text-[11px] sm:text-xs font-medium">{design.name}</span>
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       )}
@@ -487,8 +464,8 @@ function CameraView() {
               onClick={toggleCamera}
               disabled={!isCameraReady || isSwitching}
               className={`flex-shrink-0 px-5 py-2.5 sm:px-6 sm:py-3 rounded-full text-xs sm:text-sm font-medium transition-all active:scale-95 ${isCameraReady && !isSwitching
-                  ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-lg shadow-pink-500/20'
-                  : 'bg-white/10 text-white/30 cursor-not-allowed'
+                ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-lg shadow-pink-500/20'
+                : 'bg-white/10 text-white/30 cursor-not-allowed'
                 }`}
             >
               <span className="flex items-center gap-1.5">
@@ -549,7 +526,7 @@ function CameraView() {
               <button
                 onClick={() => {
                   setError(null);
-                  setupCamera(currentCameraIdx, useFrontCamera);
+                  setupCamera(facingModeRef.current);
                 }}
                 className="w-full py-2.5 bg-gradient-to-r from-pink-600 to-purple-600 rounded-full text-white font-medium text-sm active:scale-95 transition-transform"
               >
