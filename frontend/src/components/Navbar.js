@@ -79,6 +79,12 @@ const Navbar = () => {
               </button>
             ))}
             <button
+              onClick={() => window.location.href = '/customize'}
+              className="ml-2 px-5 py-2 bg-gradient-to-r from-purple-600 to-purple-700 text-white text-sm font-medium rounded-full hover:from-purple-500 hover:to-purple-600 transition-all duration-300 hover:shadow-lg hover:shadow-purple-500/25 hover:scale-105"
+            >
+              Custom Design
+            </button>
+            <button
               onClick={() => window.location.href = '/try-on'}
               className="ml-4 px-5 py-2 bg-gradient-to-r from-pink-600 to-pink-700 text-white text-sm font-medium rounded-full hover:from-pink-500 hover:to-pink-600 transition-all duration-300 hover:shadow-lg hover:shadow-pink-500/25 hover:scale-105"
             >
@@ -116,6 +122,12 @@ const Navbar = () => {
                 {link.label}
               </button>
             ))}
+            <button
+              onClick={() => { setIsMenuOpen(false); window.location.href = '/customize'; }}
+              className="block w-full px-4 py-3 mt-4 bg-gradient-to-r from-purple-600 to-purple-700 text-white text-sm font-medium rounded-xl text-center hover:from-purple-500 hover:to-purple-600 transition-all"
+            >
+              Custom Design
+            </button>
             <button
               onClick={() => { setIsMenuOpen(false); window.location.href = '/try-on'; }}
               className="block w-full px-4 py-3 mt-2 bg-gradient-to-r from-pink-600 to-pink-700 text-white text-sm font-medium rounded-xl text-center hover:from-pink-500 hover:to-pink-600 transition-all"

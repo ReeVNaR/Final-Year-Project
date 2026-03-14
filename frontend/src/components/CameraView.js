@@ -68,6 +68,7 @@ function CameraView() {
   const [error, setError] = useState(null);
   const [imageLoaded, setImageLoaded] = useState(false);
   const [selectedDesign, setSelectedDesign] = useState(NAIL_DESIGNS[0]);
+  const [availableDesigns, setAvailableDesigns] = useState(NAIL_DESIGNS);
   const [isCameraReady, setIsCameraReady] = useState(false);
   const [isSwitching, setIsSwitching] = useState(false);
   const [isModelLoading, setIsModelLoading] = useState(true);
@@ -79,7 +80,10 @@ function CameraView() {
   const loadNailImage = useCallback(async (design) => {
     setImageLoaded(false);
     const img = new window.Image();
-    img.crossOrigin = 'anonymous';
+    // Only set crossOrigin for actual URLs, not for data URLs from sessionStorage
+    if (!design.image.startsWith('data:')) {
+      img.crossOrigin = 'anonymous';
+    }
     img.src = design.image;
     return new Promise((resolve) => {
       img.onload = () => {
@@ -338,7 +342,23 @@ function CameraView() {
   // Init on mount
   useEffect(() => {
     isMounted.current = true;
-    loadNailImage(NAIL_DESIGNS[0]);
+    
+    // Check for custom design
+    const customData = sessionStorage.getItem('customTryOnData');
+    const customId = sessionStorage.getItem('customTryOnId');
+    const urlParams = new URLSearchParams(window.location.search);
+    const isCustomRequest = urlParams.get('custom') === customId && customId !== null;
+    
+    let initial = NAIL_DESIGNS[0];
+    
+    if (isCustomRequest && customData) {
+      const customDesign = { id: 'custom', name: 'Custom', image: customData, color: '#a855f7' };
+      setAvailableDesigns([customDesign, ...NAIL_DESIGNS]);
+      initial = customDesign;
+      setSelectedDesign(initial);
+    }
+    
+    loadNailImage(initial);
     setupCamera('user');
     return () => {
       isMounted.current = false;
@@ -413,8 +433,8 @@ function CameraView() {
         <div className="absolute bottom-[130px] sm:bottom-36 left-4 right-4 z-30 flex justify-center animate-fade-in">
           <div className="bg-black/60 backdrop-blur-2xl border border-white/10 rounded-2xl p-3 sm:p-4 w-full max-w-xs">
             <p className="text-white/40 text-[10px] uppercase tracking-[0.2em] mb-2.5 text-center font-medium">Nail Designs</p>
-            <div className="flex justify-center gap-2 sm:gap-3">
-              {NAIL_DESIGNS.map((design) => (
+            <div className="flex flex-wrap justify-center gap-2 sm:gap-3">
+              {availableDesigns.map((design) => (
                 <button
                   key={design.id}
                   onClick={() => {
