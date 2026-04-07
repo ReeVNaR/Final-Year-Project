@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { Hands } from '@mediapipe/hands';
 import { Camera } from '@mediapipe/camera_utils';
+import NailDesignCustomizer from './NailDesignCustomizer';
 
 const NAIL_DESIGNS = [
   { id: 1, name: 'French', image: '/images/nails/french.png', color: '#f5d5c8' },
@@ -66,7 +67,6 @@ function CameraView() {
   const facingModeRef = useRef('user'); // ref to avoid stale closures
 
   const [error, setError] = useState(null);
-  const [imageLoaded, setImageLoaded] = useState(false);
   const [selectedDesign, setSelectedDesign] = useState(NAIL_DESIGNS[0]);
   const [availableDesigns, setAvailableDesigns] = useState(NAIL_DESIGNS);
   const [isCameraReady, setIsCameraReady] = useState(false);
@@ -75,10 +75,11 @@ function CameraView() {
   const [nailSize, setNailSize] = useState(62);
   const [handsDetected, setHandsDetected] = useState(false);
   const [showDesignPanel, setShowDesignPanel] = useState(false);
+  const [isCustomizing, setIsCustomizing] = useState(false);
+  const [facingMode, setFacingMode] = useState('user');
 
   // Load nail image
   const loadNailImage = useCallback(async (design) => {
-    setImageLoaded(false);
     const img = new window.Image();
     // Only set crossOrigin for actual URLs, not for data URLs from sessionStorage
     if (!design.image.startsWith('data:')) {
@@ -88,12 +89,10 @@ function CameraView() {
     return new Promise((resolve) => {
       img.onload = () => {
         nailImageRef.current = img;
-        setImageLoaded(true);
         resolve();
       };
       img.onerror = () => {
         console.error('Failed to load nail image:', design.image);
-        setImageLoaded(true);
         resolve();
       };
     });
@@ -127,12 +126,7 @@ function CameraView() {
         videoRef.current.srcObject = null;
       }
     } catch (_) { }
-    try {
-      if (handsRef.current) {
-        await handsRef.current.close();
-        handsRef.current = null;
-      }
-    } catch (_) { }
+    // Intentionally NOT closing handsRef here to keep AI model loaded during camera switches
   }, []);
 
   // Process results — draw nails
@@ -202,35 +196,41 @@ function CameraView() {
       setupInProgress.current = true;
 
       const facing = mode || facingModeRef.current;
+      setFacingMode(facing);
 
       try {
         await stopCurrentCamera();
         setIsCameraReady(false);
-        setIsModelLoading(true);
+        // Only show loading if hands model isn't init'd yet
+        if (!handsRef.current) {
+          setIsModelLoading(true);
+        }
         setError(null);
 
         let stream;
 
-        // Strategy 1: Use exact facingMode (required for iOS WebKit)
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          throw new Error('Camera API not available. Please ensure HTTPS or check browser permissions.');
+        }
+
+        // Strategy 1: Use exact facingMode and ideal resolution
         try {
           stream = await navigator.mediaDevices.getUserMedia({
             audio: false,
             video: {
-              facingMode: { exact: facing },
+              facingMode: facing === 'environment' ? { exact: 'environment' } : 'user',
               width: { ideal: 1280 },
               height: { ideal: 720 },
             },
           });
         } catch (exactErr) {
           console.warn(`Exact facingMode "${facing}" failed, trying preference:`, exactErr.message);
-          // Strategy 2: Use facingMode as preference
+          // Strategy 2: Use facingMode as preference without resolution constraints
           try {
             stream = await navigator.mediaDevices.getUserMedia({
               audio: false,
               video: {
                 facingMode: facing,
-                width: { ideal: 1280 },
-                height: { ideal: 720 },
               },
             });
           } catch (prefErr) {
@@ -238,7 +238,7 @@ function CameraView() {
             // Strategy 3: Any camera
             stream = await navigator.mediaDevices.getUserMedia({
               audio: false,
-              video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+              video: true,
             });
           }
         }
@@ -251,30 +251,40 @@ function CameraView() {
 
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
+          videoRef.current.setAttribute('playsinline', 'true');
           await new Promise((resolve) => {
-            videoRef.current.onloadedmetadata = () => {
+            videoRef.current.onloadedmetadata = async () => {
+              try {
+                await videoRef.current.play();
+              } catch (e) {
+                console.error("Auto-play failed:", e);
+              }
               const track = stream.getVideoTracks()[0];
               const settings = track.getSettings();
-              if (canvasRef.current) {
-                canvasRef.current.width = settings.width || 1280;
-                canvasRef.current.height = settings.height || 720;
+              if (canvasRef.current && videoRef.current) {
+                canvasRef.current.width = videoRef.current.videoWidth || settings.width || 1280;
+                canvasRef.current.height = videoRef.current.videoHeight || settings.height || 720;
               }
               resolve();
             };
           });
         }
 
-        const hands = await initializeHands();
-        await hands.initialize();
-
-        if (!isMounted.current) {
-          hands.close();
-          setupInProgress.current = false;
-          return;
+        let hands = handsRef.current;
+        if (!hands) {
+          hands = await initializeHands();
+          await hands.initialize();
+          
+          if (!isMounted.current) {
+            hands.close();
+            setupInProgress.current = false;
+            return;
+          }
+          
+          handsRef.current = hands;
+          hands.onResults(onResults);
         }
-
-        handsRef.current = hands;
-        hands.onResults(onResults);
+        
         setIsModelLoading(false);
 
         const camera = new Camera(videoRef.current, {
@@ -343,28 +353,24 @@ function CameraView() {
   useEffect(() => {
     isMounted.current = true;
     
-    // Check for custom design
-    const customData = sessionStorage.getItem('customTryOnData');
-    const customId = sessionStorage.getItem('customTryOnId');
     const urlParams = new URLSearchParams(window.location.search);
-    const isCustomRequest = urlParams.get('custom') === customId && customId !== null;
+    if (urlParams.get('custom') === 'new') {
+      setIsCustomizing(true);
+    }
     
     let initial = NAIL_DESIGNS[0];
-    
-    if (isCustomRequest && customData) {
-      const customDesign = { id: 'custom', name: 'Custom', image: customData, color: '#a855f7' };
-      setAvailableDesigns([customDesign, ...NAIL_DESIGNS]);
-      initial = customDesign;
-      setSelectedDesign(initial);
-    }
     
     loadNailImage(initial);
     setupCamera('user');
     return () => {
       isMounted.current = false;
       stopCurrentCamera();
+      if (handsRef.current) {
+        handsRef.current.close().catch(() => {});
+        handsRef.current = null;
+      }
     };
-  }, []);
+  }, [loadNailImage, setupCamera]);
 
   // Reload nail image when design changes
   useEffect(() => {
@@ -389,8 +395,19 @@ function CameraView() {
     <div className="relative w-full h-[100dvh] bg-black overflow-hidden touch-none">
       {/* Camera feed */}
       <div className="absolute inset-0">
-        <video ref={videoRef} className="absolute w-full h-full object-cover" autoPlay playsInline muted />
-        <canvas ref={canvasRef} className="absolute w-full h-full object-cover" />
+        <video 
+          ref={videoRef} 
+          className="absolute w-full h-full object-cover" 
+          style={{ transform: facingMode === 'user' ? 'scaleX(-1)' : 'none' }}
+          autoPlay 
+          playsInline 
+          muted 
+        />
+        <canvas 
+          ref={canvasRef} 
+          className="absolute w-full h-full object-cover" 
+          style={{ transform: facingMode === 'user' ? 'scaleX(-1)' : 'none' }}
+        />
       </div>
 
       {/* Top bar — safe area aware */}
@@ -453,6 +470,22 @@ function CameraView() {
                   <span className="text-white text-[11px] sm:text-xs font-medium">{design.name}</span>
                 </button>
               ))}
+              
+              {/* Add Custom Design Button */}
+              <button
+                onClick={() => {
+                  setShowDesignPanel(false);
+                  setIsCustomizing(true);
+                }}
+                className="flex flex-col items-center gap-1.5 p-2 sm:p-3 rounded-xl transition-all hover:bg-white/5 active:scale-95"
+              >
+                <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl border-2 border-dashed border-white/20 flex items-center justify-center text-white/40 hover:text-white hover:border-white/50 transition-all bg-white/5">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                  </svg>
+                </div>
+                <span className="text-white/70 text-[11px] sm:text-xs font-medium">Custom</span>
+              </button>
             </div>
           </div>
         </div>
@@ -562,6 +595,19 @@ function CameraView() {
 
       {/* Close design panel when tapping outside */}
       {showDesignPanel && <div className="absolute inset-0 z-20" onClick={() => setShowDesignPanel(false)} />}
+      
+      {/* Customizer Overlay */}
+      {isCustomizing && (
+        <NailDesignCustomizer 
+          onClose={() => setIsCustomizing(false)}
+          onApply={(dataUrl, customDesignId) => {
+            const customDesign = { id: customDesignId, name: 'Custom', image: dataUrl, color: '#a855f7' };
+            setAvailableDesigns([customDesign, ...availableDesigns.filter(d => !d.id.toString().startsWith('custom_'))]);
+            setSelectedDesign(customDesign);
+            setIsCustomizing(false);
+          }}
+        />
+      )}
     </div>
   );
 }

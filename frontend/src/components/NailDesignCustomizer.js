@@ -1,9 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 
-export default function NailDesignCustomizer() {
-  const router = useRouter();
+export default function NailDesignCustomizer({ onApply, onClose }) {
   const canvasRef = useRef(null);
   const maskCanvasRef = useRef(null);
   const [designImage, setDesignImage] = useState(null);
@@ -238,15 +235,13 @@ export default function NailDesignCustomizer() {
       // Create a unique ID for this custom design
       const customDesignId = 'custom_' + Date.now();
       
-      // We store it in session storage to keep the URL clean and avoid URL length limits
-      sessionStorage.setItem('customTryOnData', dataUrl);
-      sessionStorage.setItem('customTryOnId', customDesignId);
-      
-      // Navigate to the try-on page with the custom flag
-      router.push(`/try-on?custom=${customDesignId}`);
+      // Save it state-wide or via callback
+      if (onApply) {
+        onApply(dataUrl, customDesignId);
+      }
     } catch (e) {
-      console.error("Failed to save custom design for try-on:", e);
-      alert("Image is too large to process for Try-On. Try rendering the image smaller or downloading it.");
+      console.error("Failed to apply custom design:", e);
+      alert("Image is too large to process. Try rendering the image smaller or downloading it.");
     }
   };
 
@@ -261,7 +256,7 @@ export default function NailDesignCustomizer() {
   };
 
   return (
-    <div className="min-h-screen bg-black text-white relative overflow-hidden">
+    <div className="absolute inset-0 z-50 bg-black/95 text-white overflow-hidden flex flex-col">
       {/* Ambient background effects */}
       <div className="fixed inset-0 pointer-events-none">
         <div className="absolute top-[-30%] left-[-20%] w-[70%] h-[70%] rounded-full bg-pink-500/5 blur-[120px] animate-glow-breathe" />
@@ -271,15 +266,15 @@ export default function NailDesignCustomizer() {
       {/* Top bar */}
       <div className="relative z-20 safe-top">
         <div className="flex items-center justify-between p-4 sm:p-6">
-          <Link
-            href="/"
+          <button
+            onClick={onClose}
             className="flex items-center gap-2 px-4 py-2.5 rounded-full bg-white/5 backdrop-blur-xl border border-white/10 text-white text-sm font-medium hover:bg-white/10 active:scale-95 transition-all"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
-            <span className="hidden sm:inline">Back</span>
-          </Link>
+            <span className="hidden sm:inline">Close</span>
+          </button>
 
           <h1 className="text-sm sm:text-base font-semibold tracking-wide">
             <span className="gradient-text">Nail Design Studio</span>

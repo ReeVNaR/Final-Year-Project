@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import TryOnButton from './TryOnButton';
 import FloatingParticles from './FloatingParticles';
@@ -119,7 +119,7 @@ const HomePage = () => {
               <p className="text-gray-400 text-base md:text-lg mb-10 max-w-lg mx-auto lg:mx-0 animate-fade-in delay-400 leading-relaxed font-light">Experience virtual nail designs powered by AI. Preview stunning nail art in real-time — right from your camera.</p>
               <div className="flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-6 animate-fade-in delay-500">
                 <TryOnButton />
-                <button onClick={() => window.location.href = '/customize'} className="px-8 py-3.5 bg-white/5 border border-white/10 rounded-full text-white text-sm font-medium hover:bg-white/10 hover:border-white/20 transition-all duration-300 hover:scale-105">Customize Design</button>
+                <button onClick={() => window.location.href = '/try-on?custom=new'} className="px-8 py-3.5 bg-white/5 border border-white/10 rounded-full text-white text-sm font-medium hover:bg-white/10 hover:border-white/20 transition-all duration-300 hover:scale-105">Customize Design</button>
               </div>
               <div className="mt-4 flex items-center justify-center lg:justify-start animate-fade-in delay-500">
                 <div className="text-center sm:text-left"><span className="text-gray-600 text-[10px] block tracking-[0.2em] uppercase font-light">It&apos;s completely</span><span className="text-3xl font-extrabold gradient-text">FREE</span></div>
