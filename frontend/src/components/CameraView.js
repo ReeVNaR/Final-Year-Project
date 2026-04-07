@@ -250,6 +250,12 @@ function CameraView() {
     setIsSwitching(true);
     setIsCameraReady(false);
     stopCurrentCamera();
+    
+    // Allow toggle to timeout so it doesn't lock forever on silent failures
+    setTimeout(() => {
+      setIsSwitching(false);
+    }, 2500);
+
     setFacingMode(prev => prev === 'user' ? 'environment' : 'user');
   }, [isSwitching, stopCurrentCamera]);
 
@@ -301,7 +307,9 @@ function CameraView() {
         <Webcam
           ref={webcamRef}
           audio={false}
-          videoConstraints={{ facingMode }}
+          videoConstraints={{ 
+            facingMode: facingMode === 'environment' ? { ideal: 'environment' } : 'user' 
+          }}
           onUserMedia={handleUserMedia}
           onUserMediaError={handleUserMediaError}
           className="absolute w-full h-full object-cover"
