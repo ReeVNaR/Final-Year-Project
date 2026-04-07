@@ -60,6 +60,7 @@ export default function CameraWrapper() {
 function CameraView() {
   const isMounted = useRef(true);
   const webcamRef = useRef(null);
+  const streamRef = useRef(null);
   const canvasRef = useRef(null);
   const nailImageRef = useRef(null);
   const cameraRef = useRef(null);
@@ -125,6 +126,10 @@ function CameraView() {
         video.srcObject.getTracks().forEach(t => t.stop());
         video.srcObject = null;
       }
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(t => t.stop());
+        streamRef.current = null;
+      }
     } catch (_) { }
   }, []);
 
@@ -189,7 +194,8 @@ function CameraView() {
     [nailSize]
   );
 
-  const handleUserMedia = useCallback(async () => {
+  const handleUserMedia = useCallback(async (stream) => {
+    streamRef.current = stream; // Store directly for hardware kill
     setError(null);
     setIsCameraReady(false);
     const video = webcamRef.current?.video;
@@ -341,6 +347,7 @@ function CameraView() {
         <div className="flex items-center justify-between p-3 sm:p-4">
           <Link
             href="/"
+            onClick={() => stopCurrentCamera()}
             className="flex items-center gap-1.5 px-3 py-2 sm:px-4 sm:py-2.5 rounded-full bg-black/40 backdrop-blur-xl text-white text-xs sm:text-sm font-medium active:scale-95 transition-transform"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
