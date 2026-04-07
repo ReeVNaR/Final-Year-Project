@@ -197,8 +197,13 @@ function CameraView() {
       setIsCameraReady(false);
       stopCurrentCamera();
 
+      // Crucial: iOS sometimes needs a split second to physically flush the previous camera lock
+      await new Promise(r => setTimeout(r, 300));
+
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: mode === 'user' ? 'user' : 'environment' }
+        video: { 
+          facingMode: mode === 'user' ? 'user' : { exact: 'environment' }
+        }
       });
 
       video.srcObject = stream;
@@ -509,11 +514,7 @@ function CameraView() {
               <button
                 onClick={() => {
                   setError(null);
-                  setIsSwitching(true);
-                  setFacingMode(prev => {
-                    setTimeout(() => setFacingMode(prev), 100);
-                    return prev === 'user' ? 'environment' : 'user';
-                  });
+                  setupCamera(facingMode);
                 }}
                 className="w-full py-2.5 bg-gradient-to-r from-pink-600 to-purple-600 rounded-full text-white font-medium text-sm active:scale-95 transition-transform"
               >
