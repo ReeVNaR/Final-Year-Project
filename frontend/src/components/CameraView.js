@@ -119,6 +119,13 @@ function CameraView() {
         cameraRef.current = null;
       }
     } catch (_) { }
+    try {
+      const video = webcamRef.current?.video;
+      if (video?.srcObject) {
+        video.srcObject.getTracks().forEach(t => t.stop());
+        video.srcObject = null;
+      }
+    } catch (_) { }
   }, []);
 
   // Process results — draw nails
