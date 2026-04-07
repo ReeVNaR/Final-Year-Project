@@ -213,33 +213,72 @@ function CameraView() {
           throw new Error('Camera API not available. Please ensure HTTPS or check browser permissions.');
         }
 
-        // Strategy 1: Use exact facingMode and ideal resolution
+        // Strategy 1: Use preferred facingMode and ideal resolution
         try {
           stream = await navigator.mediaDevices.getUserMedia({
             audio: false,
             video: {
-              facingMode: facing === 'environment' ? { exact: 'environment' } : 'user',
+              facingMode: facing,
               width: { ideal: 1280 },
               height: { ideal: 720 },
             },
           });
-        } catch (exactErr) {
-          console.warn(`Exact facingMode "${facing}" failed, trying preference:`, exactErr.message);
-          // Strategy 2: Use facingMode as preference without resolution constraints
+        } catch (err1) {
+          console.warn(`Preferred facingMode "${facing}" failed:`, err1.message);
+          // Strategy 2: Enumerate devices and select deviceId
           try {
-            stream = await navigator.mediaDevices.getUserMedia({
-              audio: false,
-              video: {
-                facingMode: facing,
-              },
-            });
-          } catch (prefErr) {
-            console.warn('Preference facingMode failed, trying any camera:', prefErr.message);
-            // Strategy 3: Any camera
-            stream = await navigator.mediaDevices.getUserMedia({
-              audio: false,
-              video: true,
-            });
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const videoInputs = devices.filter(d => d.kind === 'videoinput');
+            let targetId = null;
+
+            if (facing === 'environment') {
+              // Look for back cameras
+              const backCams = videoInputs.filter(d => 
+                d.label.toLowerCase().includes('back') || 
+                d.label.toLowerCase().includes('rear') || 
+                d.label.toLowerCase().includes('environment')
+              );
+              if (backCams.length > 0) {
+                targetId = backCams[backCams.length - 1].deviceId; // Often the main back camera is last
+              } else if (videoInputs.length > 1) {
+                targetId = videoInputs[1].deviceId; // Fallback guess
+              }
+            } else {
+              // Look for front cameras
+              const frontCams = videoInputs.filter(d => 
+                d.label.toLowerCase().includes('front') || 
+                d.label.toLowerCase().includes('user')
+              );
+              if (frontCams.length > 0) {
+                targetId = frontCams[0].deviceId;
+              } else if (videoInputs.length > 0) {
+                targetId = videoInputs[0].deviceId;
+              }
+            }
+
+            if (targetId) {
+              stream = await navigator.mediaDevices.getUserMedia({
+                audio: false,
+                video: { deviceId: { exact: targetId } }
+              });
+            } else {
+              throw new Error("No target deviceId found");
+            }
+          } catch (err2) {
+            console.warn('Device enumeration fallback failed:', err2.message);
+            // Strategy 3: exact constraint (Last resort before any camera)
+            try {
+              stream = await navigator.mediaDevices.getUserMedia({
+                audio: false,
+                video: { facingMode: { exact: facing } }
+              });
+            } catch (err3) {
+              // Final Strategy: Any camera
+              stream = await navigator.mediaDevices.getUserMedia({
+                audio: false,
+                video: true,
+              });
+            }
           }
         }
 
