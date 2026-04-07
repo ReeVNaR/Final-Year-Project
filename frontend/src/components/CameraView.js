@@ -3,7 +3,6 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { Hands } from '@mediapipe/hands';
 import { Camera } from '@mediapipe/camera_utils';
-import Webcam from 'react-webcam';
 import NailDesignCustomizer from './NailDesignCustomizer';
 
 const NAIL_DESIGNS = [
@@ -59,8 +58,7 @@ export default function CameraWrapper() {
 
 function CameraView() {
   const isMounted = useRef(true);
-  const webcamRef = useRef(null);
-  const streamRef = useRef(null);
+  const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const nailImageRef = useRef(null);
   const cameraRef = useRef(null);
@@ -121,14 +119,10 @@ function CameraView() {
       }
     } catch (_) { }
     try {
-      const video = webcamRef.current?.video;
+      const video = videoRef.current;
       if (video?.srcObject) {
         video.srcObject.getTracks().forEach(t => t.stop());
         video.srcObject = null;
-      }
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(t => t.stop());
-        streamRef.current = null;
       }
     } catch (_) { }
   }, []);
@@ -136,7 +130,7 @@ function CameraView() {
   // Process results — draw nails
   const onResults = useCallback(
     (results) => {
-      const video = webcamRef.current?.video;
+      const video = videoRef.current;
       if (!isMounted.current || !video || !canvasRef.current) return;
       const canvas = canvasRef.current;
       const ctx = canvas.getContext('2d');
@@ -194,21 +188,33 @@ function CameraView() {
     [nailSize]
   );
 
-  const handleUserMedia = useCallback(async (stream) => {
-    streamRef.current = stream; // Store directly for hardware kill
-    setError(null);
-    setIsCameraReady(false);
-    const video = webcamRef.current?.video;
+  const setupCamera = useCallback(async (mode) => {
+    const video = videoRef.current;
     if (!video) return;
 
-    video.setAttribute('playsinline', 'true');
-
-    if (canvasRef.current) {
-      canvasRef.current.width = video.videoWidth || 1280;
-      canvasRef.current.height = video.videoHeight || 720;
-    }
-
     try {
+      setError(null);
+      setIsCameraReady(false);
+      stopCurrentCamera();
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: mode === 'user' ? 'user' : 'environment' }
+      });
+
+      video.srcObject = stream;
+      video.setAttribute('playsinline', 'true');
+      
+      await new Promise(resolve => {
+        video.onloadedmetadata = () => {
+          video.play().catch(e => console.error(e));
+          if (canvasRef.current && video) {
+            canvasRef.current.width = video.videoWidth || 1280;
+            canvasRef.current.height = video.videoHeight || 720;
+          }
+          resolve();
+        };
+      });
+
       let hands = handsRef.current;
       if (!hands) {
         setIsModelLoading(true);
@@ -245,25 +251,19 @@ function CameraView() {
       await camera.start();
       setIsCameraReady(true);
     } catch (err) {
-      console.error('Model or camera start error:', err);
+      console.error('Webcam access error:', err);
       setIsModelLoading(false);
+      setError(typeof err === 'string' ? err : err.message || 'Camera permission denied or not found.');
+      stopCurrentCamera();
     } finally {
       setIsSwitching(false);
     }
-  }, [initializeHands, onResults]);
-
-  const handleUserMediaError = useCallback((err) => {
-    console.error('Webcam access error:', err);
-    setIsModelLoading(false);
-    setIsSwitching(false);
-    setError(typeof err === 'string' ? err : err.message || 'Camera permission denied or not found.');
-  }, []);
+  }, [initializeHands, onResults, stopCurrentCamera]);
 
   const toggleCamera = useCallback(() => {
     if (isSwitching) return;
     setIsSwitching(true);
     setIsCameraReady(false);
-    stopCurrentCamera();
     
     // Allow toggle to timeout so it doesn't lock forever on silent failures
     setTimeout(() => {
@@ -271,7 +271,7 @@ function CameraView() {
     }, 2500);
 
     setFacingMode(prev => prev === 'user' ? 'environment' : 'user');
-  }, [isSwitching, stopCurrentCamera]);
+  }, [isSwitching]);
 
   // Init on mount
   useEffect(() => {
@@ -294,6 +294,12 @@ function CameraView() {
       }
     };
   }, [loadNailImage, stopCurrentCamera]);
+
+  useEffect(() => {
+    if (isMounted.current) {
+      setupCamera(facingMode);
+    }
+  }, [facingMode, setupCamera]);
 
   // Reload nail image when design changes
   useEffect(() => {
@@ -318,22 +324,13 @@ function CameraView() {
     <div className="relative w-full h-[100dvh] bg-black overflow-hidden touch-none">
       {/* Camera feed */}
       <div className="absolute inset-0">
-        <Webcam
-          key={facingMode}
-          ref={webcamRef}
-          audio={false}
-          videoConstraints={{ 
-            facingMode: facingMode === 'environment' ? { exact: 'environment' } : 'user',
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
-          }}
-          onUserMedia={handleUserMedia}
-          onUserMediaError={handleUserMediaError}
+        <video
+          ref={videoRef}
           className="absolute w-full h-full object-cover"
           style={{ transform: facingMode === 'user' ? 'scaleX(-1)' : 'none' }}
-          playsInline={true}
-          autoPlay={true}
-          muted={true}
+          playsInline
+          autoPlay
+          muted
         />
         <canvas 
           ref={canvasRef} 
