@@ -183,6 +183,7 @@ function CameraView() {
   );
 
   const handleUserMedia = useCallback(async () => {
+    setError(null);
     setIsCameraReady(false);
     const video = webcamRef.current?.video;
     if (!video) return;
@@ -305,10 +306,13 @@ function CameraView() {
       {/* Camera feed */}
       <div className="absolute inset-0">
         <Webcam
+          key={facingMode}
           ref={webcamRef}
           audio={false}
           videoConstraints={{ 
-            facingMode: facingMode === 'environment' ? { ideal: 'environment' } : 'user' 
+            facingMode: facingMode === 'environment' ? { exact: 'environment' } : 'user',
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
           }}
           onUserMedia={handleUserMedia}
           onUserMediaError={handleUserMediaError}
