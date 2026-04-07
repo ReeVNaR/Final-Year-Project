@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { Hands } from '@mediapipe/hands';
 import { Camera } from '@mediapipe/camera_utils';
+import Webcam from 'react-webcam';
 import NailDesignCustomizer from './NailDesignCustomizer';
 
 const NAIL_DESIGNS = [
@@ -58,13 +59,11 @@ export default function CameraWrapper() {
 
 function CameraView() {
   const isMounted = useRef(true);
-  const videoRef = useRef(null);
+  const webcamRef = useRef(null);
   const canvasRef = useRef(null);
   const nailImageRef = useRef(null);
   const cameraRef = useRef(null);
   const handsRef = useRef(null);
-  const setupInProgress = useRef(false);
-  const facingModeRef = useRef('user'); // ref to avoid stale closures
 
   const [error, setError] = useState(null);
   const [selectedDesign, setSelectedDesign] = useState(NAIL_DESIGNS[0]);
@@ -113,30 +112,24 @@ function CameraView() {
   }, []);
 
   // Stop camera and clean up
-  const stopCurrentCamera = useCallback(async () => {
+  const stopCurrentCamera = useCallback(() => {
     try {
       if (cameraRef.current) {
         cameraRef.current.stop();
         cameraRef.current = null;
       }
     } catch (_) { }
-    try {
-      if (videoRef.current?.srcObject) {
-        videoRef.current.srcObject.getTracks().forEach((t) => t.stop());
-        videoRef.current.srcObject = null;
-      }
-    } catch (_) { }
-    // Intentionally NOT closing handsRef here to keep AI model loaded during camera switches
   }, []);
 
   // Process results — draw nails
   const onResults = useCallback(
     (results) => {
-      if (!isMounted.current || !videoRef.current || !canvasRef.current) return;
+      const video = webcamRef.current?.video;
+      if (!isMounted.current || !video || !canvasRef.current) return;
       const canvas = canvasRef.current;
       const ctx = canvas.getContext('2d');
-      const width = videoRef.current.videoWidth;
-      const height = videoRef.current.videoHeight;
+      const width = video.videoWidth;
+      const height = video.videoHeight;
       if (!width || !height) return;
 
       canvas.width = width;
@@ -189,204 +182,76 @@ function CameraView() {
     [nailSize]
   );
 
-  // Setup camera — uses facingModeRef for iOS compatibility
-  const setupCamera = useCallback(
-    async (mode) => {
-      if (!isMounted.current || setupInProgress.current) return;
-      setupInProgress.current = true;
-
-      const facing = mode || facingModeRef.current;
-      setFacingMode(facing);
-
-      try {
-        await stopCurrentCamera();
-        setIsCameraReady(false);
-        // Only show loading if hands model isn't init'd yet
-        if (!handsRef.current) {
-          setIsModelLoading(true);
-        }
-        setError(null);
-
-        let stream;
-
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-          throw new Error('Camera API not available. Please ensure HTTPS or check browser permissions.');
-        }
-
-        // Strategy 1: Use preferred facingMode and ideal resolution
-        try {
-          stream = await navigator.mediaDevices.getUserMedia({
-            audio: false,
-            video: {
-              facingMode: facing,
-              width: { ideal: 1280 },
-              height: { ideal: 720 },
-            },
-          });
-        } catch (err1) {
-          console.warn(`Preferred facingMode "${facing}" failed:`, err1.message);
-          // Strategy 2: Enumerate devices and select deviceId
-          try {
-            const devices = await navigator.mediaDevices.enumerateDevices();
-            const videoInputs = devices.filter(d => d.kind === 'videoinput');
-            let targetId = null;
-
-            if (facing === 'environment') {
-              // Look for back cameras
-              const backCams = videoInputs.filter(d => 
-                d.label.toLowerCase().includes('back') || 
-                d.label.toLowerCase().includes('rear') || 
-                d.label.toLowerCase().includes('environment')
-              );
-              if (backCams.length > 0) {
-                targetId = backCams[backCams.length - 1].deviceId; // Often the main back camera is last
-              } else if (videoInputs.length > 1) {
-                targetId = videoInputs[1].deviceId; // Fallback guess
-              }
-            } else {
-              // Look for front cameras
-              const frontCams = videoInputs.filter(d => 
-                d.label.toLowerCase().includes('front') || 
-                d.label.toLowerCase().includes('user')
-              );
-              if (frontCams.length > 0) {
-                targetId = frontCams[0].deviceId;
-              } else if (videoInputs.length > 0) {
-                targetId = videoInputs[0].deviceId;
-              }
-            }
-
-            if (targetId) {
-              stream = await navigator.mediaDevices.getUserMedia({
-                audio: false,
-                video: { deviceId: { exact: targetId } }
-              });
-            } else {
-              throw new Error("No target deviceId found");
-            }
-          } catch (err2) {
-            console.warn('Device enumeration fallback failed:', err2.message);
-            // Strategy 3: exact constraint (Last resort before any camera)
-            try {
-              stream = await navigator.mediaDevices.getUserMedia({
-                audio: false,
-                video: { facingMode: { exact: facing } }
-              });
-            } catch (err3) {
-              // Final Strategy: Any camera
-              stream = await navigator.mediaDevices.getUserMedia({
-                audio: false,
-                video: true,
-              });
-            }
-          }
-        }
-
-        if (!isMounted.current) {
-          stream.getTracks().forEach((t) => t.stop());
-          setupInProgress.current = false;
-          return;
-        }
-
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.setAttribute('playsinline', 'true');
-          await new Promise((resolve) => {
-            videoRef.current.onloadedmetadata = async () => {
-              try {
-                await videoRef.current.play();
-              } catch (e) {
-                console.error("Auto-play failed:", e);
-              }
-              const track = stream.getVideoTracks()[0];
-              const settings = track.getSettings();
-              if (canvasRef.current && videoRef.current) {
-                canvasRef.current.width = videoRef.current.videoWidth || settings.width || 1280;
-                canvasRef.current.height = videoRef.current.videoHeight || settings.height || 720;
-              }
-              resolve();
-            };
-          });
-        }
-
-        let hands = handsRef.current;
-        if (!hands) {
-          hands = await initializeHands();
-          await hands.initialize();
-          
-          if (!isMounted.current) {
-            hands.close();
-            setupInProgress.current = false;
-            return;
-          }
-          
-          handsRef.current = hands;
-          hands.onResults(onResults);
-        }
-        
-        setIsModelLoading(false);
-
-        const camera = new Camera(videoRef.current, {
-          onFrame: async () => {
-            if (handsRef.current && isMounted.current && videoRef.current?.readyState === 4) {
-              try {
-                await handsRef.current.send({ image: videoRef.current });
-              } catch (err) {
-                if (!err.message?.includes('already deleted')) {
-                  console.error('Hand detection error:', err);
-                }
-              }
-            }
-          },
-        });
-
-        cameraRef.current = camera;
-        await camera.start();
-        setIsCameraReady(true);
-      } catch (err) {
-        console.error('Camera setup error:', err);
-        setIsModelLoading(false);
-        if (err.name === 'NotAllowedError') {
-          setError('Camera permission denied. Please allow camera access in your browser settings.');
-        } else if (err.name === 'NotFoundError') {
-          setError('No camera found on this device.');
-        } else if (err.name === 'NotReadableError') {
-          setError('Camera is being used by another app. Close other apps and try again.');
-        } else {
-          setError('Failed to start camera. Please refresh and try again.');
-        }
-      } finally {
-        setupInProgress.current = false;
-      }
-    },
-    [stopCurrentCamera, initializeHands, onResults]
-  );
-
-  // Toggle camera — iOS-compatible using exact facingMode
-  const toggleCamera = useCallback(async () => {
-    if (isSwitching || setupInProgress.current) return;
-    setIsSwitching(true);
+  const handleUserMedia = useCallback(async () => {
     setIsCameraReady(false);
+    const video = webcamRef.current?.video;
+    if (!video) return;
+
+    video.setAttribute('playsinline', 'true');
+
+    if (canvasRef.current) {
+      canvasRef.current.width = video.videoWidth || 1280;
+      canvasRef.current.height = video.videoHeight || 720;
+    }
 
     try {
-      // Fully stop everything first
-      await stopCurrentCamera();
+      let hands = handsRef.current;
+      if (!hands) {
+        setIsModelLoading(true);
+        hands = await initializeHands();
+        await hands.initialize();
+        if (!isMounted.current) {
+          hands.close();
+          return;
+        }
+        handsRef.current = hands;
+        hands.onResults(onResults);
+      }
+      setIsModelLoading(false);
 
-      // Wait for iOS to fully release the camera hardware
-      await new Promise((r) => setTimeout(r, 500));
+      if (cameraRef.current) {
+        cameraRef.current.stop();
+      }
 
-      // Toggle the facing mode using the ref (avoids stale closure)
-      const newMode = facingModeRef.current === 'user' ? 'environment' : 'user';
-      facingModeRef.current = newMode;
+      const camera = new Camera(video, {
+        onFrame: async () => {
+          if (handsRef.current && isMounted.current && video.readyState === 4) {
+            try {
+              await handsRef.current.send({ image: video });
+            } catch (err) {
+              if (!err.message?.includes('already deleted')) {
+                console.error('Hand detection error:', err);
+              }
+            }
+          }
+        },
+      });
 
-      await setupCamera(newMode);
+      cameraRef.current = camera;
+      await camera.start();
+      setIsCameraReady(true);
     } catch (err) {
-      console.error('Error switching camera:', err);
-      setError('Failed to switch camera. Please try again.');
+      console.error('Model or camera start error:', err);
+      setIsModelLoading(false);
     } finally {
       setIsSwitching(false);
     }
-  }, [isSwitching, stopCurrentCamera, setupCamera]);
+  }, [initializeHands, onResults]);
+
+  const handleUserMediaError = useCallback((err) => {
+    console.error('Webcam access error:', err);
+    setIsModelLoading(false);
+    setIsSwitching(false);
+    setError(typeof err === 'string' ? err : err.message || 'Camera permission denied or not found.');
+  }, []);
+
+  const toggleCamera = useCallback(() => {
+    if (isSwitching) return;
+    setIsSwitching(true);
+    setIsCameraReady(false);
+    stopCurrentCamera();
+    setFacingMode(prev => prev === 'user' ? 'environment' : 'user');
+  }, [isSwitching, stopCurrentCamera]);
 
   // Init on mount
   useEffect(() => {
@@ -400,7 +265,6 @@ function CameraView() {
     let initial = NAIL_DESIGNS[0];
     
     loadNailImage(initial);
-    setupCamera('user');
     return () => {
       isMounted.current = false;
       stopCurrentCamera();
@@ -409,7 +273,7 @@ function CameraView() {
         handsRef.current = null;
       }
     };
-  }, [loadNailImage, setupCamera]);
+  }, [loadNailImage, stopCurrentCamera]);
 
   // Reload nail image when design changes
   useEffect(() => {
@@ -434,13 +298,17 @@ function CameraView() {
     <div className="relative w-full h-[100dvh] bg-black overflow-hidden touch-none">
       {/* Camera feed */}
       <div className="absolute inset-0">
-        <video 
-          ref={videoRef} 
-          className="absolute w-full h-full object-cover" 
+        <Webcam
+          ref={webcamRef}
+          audio={false}
+          videoConstraints={{ facingMode }}
+          onUserMedia={handleUserMedia}
+          onUserMediaError={handleUserMediaError}
+          className="absolute w-full h-full object-cover"
           style={{ transform: facingMode === 'user' ? 'scaleX(-1)' : 'none' }}
-          autoPlay 
-          playsInline 
-          muted 
+          playsInline={true}
+          autoPlay={true}
+          muted={true}
         />
         <canvas 
           ref={canvasRef} 
@@ -618,7 +486,11 @@ function CameraView() {
               <button
                 onClick={() => {
                   setError(null);
-                  setupCamera(facingModeRef.current);
+                  setIsSwitching(true);
+                  setFacingMode(prev => {
+                    setTimeout(() => setFacingMode(prev), 100);
+                    return prev === 'user' ? 'environment' : 'user';
+                  });
                 }}
                 className="w-full py-2.5 bg-gradient-to-r from-pink-600 to-purple-600 rounded-full text-white font-medium text-sm active:scale-95 transition-transform"
               >
