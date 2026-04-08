@@ -64,7 +64,7 @@ function CameraView() {
   const animFrameRef = useRef(null);
   const processingRef = useRef(false);
   const facingModeRef = useRef('user');
-  const nailSizeRef = useRef(62);
+  const nailSizeRef = useRef(100);
 
   const [error, setError] = useState(null);
   const [selectedDesign, setSelectedDesign] = useState(NAIL_DESIGNS[0]);
@@ -72,7 +72,7 @@ function CameraView() {
   const [isCameraReady, setIsCameraReady] = useState(false);
   const [isSwitching, setIsSwitching] = useState(false);
   const [isModelLoading, setIsModelLoading] = useState(true);
-  const [nailSize, setNailSize] = useState(62);
+  const [nailSize, setNailSize] = useState(100);
   const [handsDetected, setHandsDetected] = useState(false);
   const [showDesignPanel, setShowDesignPanel] = useState(false);
   const [isCustomizing, setIsCustomizing] = useState(false);
@@ -171,19 +171,36 @@ function CameraView() {
 
               if (opacity <= 0) return; // Skip fully invisible fingers
 
-              const x = tip.x * width;
-              const y = tip.y * height;
-              const jx = joint.x * width;
-              const jy = joint.y * height;
-              const fingerWidth = Math.sqrt((x - jx) ** 2 + (y - jy) ** 2);
-              const sz = Math.min(fingerWidth * 1.2, currentNailSize);
-              const angle = Math.atan2(joint.y - tip.y, joint.x - tip.x);
+              const tipX = tip.x * width;
+              const tipY = tip.y * height;
+              const jointX = joint.x * width;
+              const jointY = joint.y * height;
+              const pipX = pip.x * width;
+              const pipY = pip.y * height;
+
+              // Use tip-to-PIP distance for more accurate finger length measurement
+              const segmentLen = Math.sqrt((tipX - pipX) ** 2 + (tipY - pipY) ** 2);
+              const tipToJoint = Math.sqrt((tipX - jointX) ** 2 + (tipY - jointY) ** 2);
+
+              // Nail dimensions: height covers tip-to-PIP, width is proportional
+              // Scale factor from the user-adjustable size (100 = full coverage)
+              const scaleFactor = currentNailSize / 100;
+              const nailHeight = segmentLen * 0.95 * scaleFactor;
+              const nailWidth = tipToJoint * 1.8 * scaleFactor;
+
+              // Angle from tip pointing toward the joint (along the finger)
+              const angle = Math.atan2(jointY - tipY, jointX - tipX);
+
+              // Position: center the nail between tip and DIP joint (the nail bed area)
+              const centerX = (tipX + jointX) / 2;
+              const centerY = (tipY + jointY) / 2;
 
               ctx.save();
               ctx.globalAlpha = Math.min(1, Math.max(0, opacity));
-              ctx.translate(x, y);
-              ctx.rotate(angle - Math.PI / 2);
-              ctx.drawImage(nailImageRef.current, -sz / 2, -sz / 2 - sz * 0.2, sz, sz);
+              ctx.translate(centerX, centerY);
+              ctx.rotate(angle + Math.PI / 2);
+              // Draw with nail centered — width along finger width, height along finger length
+              ctx.drawImage(nailImageRef.current, -nailWidth / 2, -nailHeight / 2, nailWidth, nailHeight);
               ctx.restore();
             });
           }
@@ -440,7 +457,7 @@ function CameraView() {
   }, [selectedDesign, loadNailImage]);
 
   const handleNailSizeChange = (delta) => {
-    setNailSize((prev) => Math.max(24, Math.min(120, prev + delta)));
+    setNailSize((prev) => Math.max(40, Math.min(200, prev + delta)));
   };
 
   // Capture screenshot
