@@ -137,37 +137,55 @@ function CameraView() {
         setHandsDetected(true);
         if (nailImageRef.current) {
           const currentNailSize = nailSizeRef.current;
-          for (const [idx, landmarks] of results.multiHandLandmarks.entries()) {
-            const handedness = results.multiHandedness[idx].label;
-            const wrist = landmarks[0];
-            const index_tip = landmarks[8];
-            const middle = landmarks[12];
-            const pinky = landmarks[20];
+          for (const landmarks of results.multiHandLandmarks) {
+            // Finger tip indices and their corresponding DIP (joint below tip) indices
+            // Thumb: tip=4, dip=3  |  Index: tip=8, dip=7  |  Middle: tip=12, dip=11
+            // Ring: tip=16, dip=15  |  Pinky: tip=20, dip=19
+            const fingerTips = [4, 8, 12, 16, 20];
 
-            const v1 = { x: middle.x - wrist.x, y: middle.y - wrist.y, z: middle.z - wrist.z };
-            const v2 = { x: pinky.x - index_tip.x, y: pinky.y - index_tip.y, z: pinky.z - index_tip.z };
-            const normal_z = v1.x * v2.y - v1.y * v2.x;
-            const isPalmAway = handedness === 'Left' ? normal_z > 0 : normal_z < 0;
+            fingerTips.forEach((tipIndex) => {
+              const tip = landmarks[tipIndex];
+              const joint = landmarks[tipIndex - 1]; // DIP joint
+              const pip = landmarks[tipIndex - 2];   // PIP joint (one more below)
 
-            if (isPalmAway) {
-              [4, 8, 12, 16, 20].forEach((tipIndex) => {
-                const tip = landmarks[tipIndex];
-                const joint = landmarks[tipIndex - 1];
-                const x = tip.x * width;
-                const y = tip.y * height;
-                const jx = joint.x * width;
-                const jy = joint.y * height;
-                const fingerWidth = Math.sqrt((x - jx) ** 2 + (y - jy) ** 2);
-                const sz = Math.min(fingerWidth * 1.2, currentNailSize);
-                const angle = Math.atan2(joint.y - tip.y, joint.x - tip.x);
+              // Per-finger visibility: check if the nail side is facing the camera
+              // using z-depth. Tip being closer (smaller z) than DIP means nail faces camera.
+              // We also check PIP for a more stable signal.
+              const zDiffTipJoint = joint.z - tip.z;  // positive = tip closer = nail visible
+              const zDiffJointPip = pip.z - joint.z;
 
-                ctx.save();
-                ctx.translate(x, y);
-                ctx.rotate(angle - Math.PI / 2);
-                ctx.drawImage(nailImageRef.current, -sz / 2, -sz / 2 - sz * 0.2, sz, sz);
-                ctx.restore();
-              });
-            }
+              // Combined z signal — if fingertip area is generally facing camera, show nail
+              const zSignal = zDiffTipJoint + zDiffJointPip * 0.5;
+
+              // Smooth opacity: fully visible when clearly nail-side, fades when transitioning
+              // This prevents the jarring on/off flicker at edge angles
+              let opacity;
+              if (zSignal > 0.01) {
+                opacity = 1.0; // Clearly nail-side facing camera
+              } else if (zSignal > -0.02) {
+                // Transition zone — smooth fade
+                opacity = (zSignal + 0.02) / 0.03;
+              } else {
+                opacity = 0; // Clearly palm-side facing camera
+              }
+
+              if (opacity <= 0) return; // Skip fully invisible fingers
+
+              const x = tip.x * width;
+              const y = tip.y * height;
+              const jx = joint.x * width;
+              const jy = joint.y * height;
+              const fingerWidth = Math.sqrt((x - jx) ** 2 + (y - jy) ** 2);
+              const sz = Math.min(fingerWidth * 1.2, currentNailSize);
+              const angle = Math.atan2(joint.y - tip.y, joint.x - tip.x);
+
+              ctx.save();
+              ctx.globalAlpha = Math.min(1, Math.max(0, opacity));
+              ctx.translate(x, y);
+              ctx.rotate(angle - Math.PI / 2);
+              ctx.drawImage(nailImageRef.current, -sz / 2, -sz / 2 - sz * 0.2, sz, sz);
+              ctx.restore();
+            });
           }
         }
       } else {
