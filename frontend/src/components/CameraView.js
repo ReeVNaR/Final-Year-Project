@@ -198,7 +198,7 @@ function CameraView() {
               ctx.save();
               ctx.globalAlpha = Math.min(1, Math.max(0, opacity));
               ctx.translate(centerX, centerY);
-              ctx.rotate(angle + Math.PI / 2);
+              ctx.rotate(angle - Math.PI / 2);
               // Draw with nail centered — width along finger width, height along finger length
               ctx.drawImage(nailImageRef.current, -nailWidth / 2, -nailHeight / 2, nailWidth, nailHeight);
               ctx.restore();
