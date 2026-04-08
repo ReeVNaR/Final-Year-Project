@@ -2,7 +2,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { Hands } from '@mediapipe/hands';
-import { Camera } from '@mediapipe/camera_utils';
 import NailDesignCustomizer from './NailDesignCustomizer';
 
 const NAIL_DESIGNS = [
@@ -61,8 +60,11 @@ function CameraView() {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const nailImageRef = useRef(null);
-  const cameraRef = useRef(null);
   const handsRef = useRef(null);
+  const animFrameRef = useRef(null);
+  const processingRef = useRef(false);
+  const facingModeRef = useRef('user');
+  const nailSizeRef = useRef(62);
 
   const [error, setError] = useState(null);
   const [selectedDesign, setSelectedDesign] = useState(NAIL_DESIGNS[0]);
@@ -75,11 +77,29 @@ function CameraView() {
   const [showDesignPanel, setShowDesignPanel] = useState(false);
   const [isCustomizing, setIsCustomizing] = useState(false);
   const [facingMode, setFacingMode] = useState('user');
+  const [isMobileDevice, setIsMobileDevice] = useState(false);
+
+  // Keep refs in sync with state
+  useEffect(() => { facingModeRef.current = facingMode; }, [facingMode]);
+  useEffect(() => { nailSizeRef.current = nailSize; }, [nailSize]);
+
+  // Detect mobile device on mount
+  useEffect(() => {
+    const checkMobile = () => {
+      const ua = navigator.userAgent || '';
+      const isMobile = /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+      // Also check for touch support + small screen as a fallback
+      const hasTouchAndSmallScreen = ('ontouchstart' in window || navigator.maxTouchPoints > 0) && window.innerWidth <= 1024;
+      setIsMobileDevice(isMobile || hasTouchAndSmallScreen);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   // Load nail image
   const loadNailImage = useCallback(async (design) => {
     const img = new window.Image();
-    // Only set crossOrigin for actual URLs, not for data URLs from sessionStorage
     if (!design.image.startsWith('data:')) {
       img.crossOrigin = 'anonymous';
     }
@@ -96,38 +116,7 @@ function CameraView() {
     });
   }, []);
 
-  // Initialize MediaPipe Hands
-  const initializeHands = useCallback(async () => {
-    const hands = new Hands({
-      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
-    });
-    await hands.setOptions({
-      maxNumHands: 2,
-      modelComplexity: 1,
-      minDetectionConfidence: 0.6,
-      minTrackingConfidence: 0.5,
-    });
-    return hands;
-  }, []);
-
-  // Stop camera and clean up
-  const stopCurrentCamera = useCallback(() => {
-    try {
-      if (cameraRef.current) {
-        cameraRef.current.stop();
-        cameraRef.current = null;
-      }
-    } catch (_) { }
-    try {
-      const video = videoRef.current;
-      if (video?.srcObject) {
-        video.srcObject.getTracks().forEach(t => t.stop());
-        video.srcObject = null;
-      }
-    } catch (_) { }
-  }, []);
-
-  // Process results — draw nails
+  // Process results — draw nails (uses refs to avoid re-creation on nailSize change)
   const onResults = useCallback(
     (results) => {
       const video = videoRef.current;
@@ -147,6 +136,7 @@ function CameraView() {
       if (results.multiHandLandmarks?.length > 0) {
         setHandsDetected(true);
         if (nailImageRef.current) {
+          const currentNailSize = nailSizeRef.current;
           for (const [idx, landmarks] of results.multiHandLandmarks.entries()) {
             const handedness = results.multiHandedness[idx].label;
             const wrist = landmarks[0];
@@ -168,7 +158,7 @@ function CameraView() {
                 const jx = joint.x * width;
                 const jy = joint.y * height;
                 const fingerWidth = Math.sqrt((x - jx) ** 2 + (y - jy) ** 2);
-                const sz = Math.min(fingerWidth * 1.2, nailSize);
+                const sz = Math.min(fingerWidth * 1.2, currentNailSize);
                 const angle = Math.atan2(joint.y - tip.y, joint.x - tip.x);
 
                 ctx.save();
@@ -185,126 +175,246 @@ function CameraView() {
       }
       ctx.restore();
     },
-    [nailSize]
+    [] // No deps — uses refs for dynamic values
   );
 
+  // Stop all tracks and cancel animation frame
+  const stopEverything = useCallback(() => {
+    // Cancel the detection loop
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+    // Stop all media tracks
+    try {
+      const video = videoRef.current;
+      if (video?.srcObject) {
+        const tracks = video.srcObject.getTracks();
+        tracks.forEach(t => t.stop());
+        video.srcObject = null;
+      }
+    } catch (_) { }
+  }, []);
+
+  // Initialize MediaPipe Hands (only once)
+  const initializeHands = useCallback(async () => {
+    if (handsRef.current) return handsRef.current;
+
+    setIsModelLoading(true);
+    const hands = new Hands({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
+    });
+    await hands.setOptions({
+      maxNumHands: 2,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.6,
+      minTrackingConfidence: 0.5,
+    });
+    hands.onResults(onResults);
+    await hands.initialize();
+
+    if (!isMounted.current) {
+      hands.close();
+      return null;
+    }
+
+    handsRef.current = hands;
+    setIsModelLoading(false);
+    return hands;
+  }, [onResults]);
+
+  // The detection loop — sends video frames to MediaPipe
+  const startDetectionLoop = useCallback(() => {
+    // Cancel any existing loop
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+
+    const detect = async () => {
+      if (!isMounted.current) return;
+
+      const video = videoRef.current;
+      const hands = handsRef.current;
+
+      if (video && hands && video.readyState === 4 && !processingRef.current) {
+        processingRef.current = true;
+        try {
+          await hands.send({ image: video });
+        } catch (err) {
+          // Suppress "already deleted" errors that happen during cleanup
+          if (!err.message?.includes('already deleted') && !err.message?.includes('disposed')) {
+            console.warn('Hand detection frame error:', err.message);
+          }
+        }
+        processingRef.current = false;
+      }
+
+      if (isMounted.current) {
+        animFrameRef.current = requestAnimationFrame(detect);
+      }
+    };
+
+    animFrameRef.current = requestAnimationFrame(detect);
+  }, []);
+
+  // Core: acquire the camera stream for a given facing mode
   const setupCamera = useCallback(async (mode) => {
     const video = videoRef.current;
-    if (!video) return;
+    if (!video || !isMounted.current) return;
 
     try {
       setError(null);
       setIsCameraReady(false);
-      stopCurrentCamera();
 
-      // Crucial: iOS sometimes needs a split second to physically flush the previous camera lock
-      await new Promise(r => setTimeout(r, 300));
+      // 1. Stop everything first
+      stopEverything();
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { 
-          facingMode: mode === 'user' ? 'user' : { exact: 'environment' }
+      // 2. Wait for hardware to release — critical for iOS
+      await new Promise(r => setTimeout(r, 400));
+      if (!isMounted.current) return;
+
+      // 3. Build constraints — iOS needs 'user'/'environment' (no "exact"),
+      //    Android works fine with both but "exact" can fail if no rear camera
+      let constraints;
+      const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+
+      if (mode === 'user') {
+        constraints = { video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false };
+      } else {
+        if (isIOS) {
+          // iOS Safari doesn't support { exact: 'environment' } reliably
+          constraints = { video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false };
+        } else {
+          // Android — try exact first, fall back to ideal
+          constraints = { video: { facingMode: { exact: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false };
         }
-      });
+      }
 
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (exactErr) {
+        // Fallback: if exact environment failed (e.g. device has no rear camera), try without exact
+        if (mode === 'environment') {
+          console.warn('Exact environment failed, trying ideal fallback:', exactErr.message);
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+            audio: false,
+          });
+        } else {
+          throw exactErr;
+        }
+      }
+
+      if (!isMounted.current) {
+        stream.getTracks().forEach(t => t.stop());
+        return;
+      }
+
+      // 4. Attach stream to video element
       video.srcObject = stream;
       video.setAttribute('playsinline', 'true');
-      
-      await new Promise(resolve => {
+      video.setAttribute('webkit-playsinline', 'true');
+      video.muted = true;
+
+      // 5. Wait for video to be ready
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Video load timeout')), 8000);
         video.onloadedmetadata = () => {
-          video.play().catch(e => console.error(e));
-          if (canvasRef.current && video) {
-            canvasRef.current.width = video.videoWidth || 1280;
-            canvasRef.current.height = video.videoHeight || 720;
-          }
-          resolve();
+          clearTimeout(timeout);
+          video.play()
+            .then(resolve)
+            .catch(resolve); // Even if autoplay is blocked, continue
+        };
+        video.onerror = () => {
+          clearTimeout(timeout);
+          reject(new Error('Video element error'));
         };
       });
 
-      let hands = handsRef.current;
-      if (!hands) {
-        setIsModelLoading(true);
-        hands = await initializeHands();
-        await hands.initialize();
-        if (!isMounted.current) {
-          hands.close();
-          return;
-        }
-        handsRef.current = hands;
-        hands.onResults(onResults);
-      }
-      setIsModelLoading(false);
-
-      if (cameraRef.current) {
-        cameraRef.current.stop();
+      if (!isMounted.current) {
+        stream.getTracks().forEach(t => t.stop());
+        return;
       }
 
-      const camera = new Camera(video, {
-        onFrame: async () => {
-          if (handsRef.current && isMounted.current && video.readyState === 4) {
-            try {
-              await handsRef.current.send({ image: video });
-            } catch (err) {
-              if (!err.message?.includes('already deleted')) {
-                console.error('Hand detection error:', err);
-              }
-            }
-          }
-        },
-      });
+      // 6. Set canvas size
+      if (canvasRef.current) {
+        canvasRef.current.width = video.videoWidth || 1280;
+        canvasRef.current.height = video.videoHeight || 720;
+      }
 
-      cameraRef.current = camera;
-      await camera.start();
+      // 7. Initialize MediaPipe Hands if not yet done
+      const hands = await initializeHands();
+      if (!hands || !isMounted.current) {
+        stream.getTracks().forEach(t => t.stop());
+        return;
+      }
+
+      // 8. Start the detection loop
+      startDetectionLoop();
       setIsCameraReady(true);
-    } catch (err) {
-      console.error('Webcam access error:', err);
-      setIsModelLoading(false);
-      setError(typeof err === 'string' ? err : err.message || 'Camera permission denied or not found.');
-      stopCurrentCamera();
-    } finally {
-      setIsSwitching(false);
-    }
-  }, [initializeHands, onResults, stopCurrentCamera]);
 
-  const toggleCamera = useCallback(() => {
+    } catch (err) {
+      console.error('Camera setup error:', err);
+      setIsModelLoading(false);
+
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        setError('Camera permission denied. Please allow camera access in your browser settings.');
+      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+        setError('No camera found on this device.');
+      } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+        setError('Camera is in use by another app. Please close it and try again.');
+      } else if (err.name === 'OverconstrainedError') {
+        // This camera mode is not available — silently revert
+        setError('This camera is not available on your device.');
+      } else {
+        setError(err.message || 'Could not start camera.');
+      }
+      stopEverything();
+    }
+  }, [stopEverything, initializeHands, startDetectionLoop]);
+
+  // Toggle camera (mobile only)
+  const toggleCamera = useCallback(async () => {
     if (isSwitching) return;
     setIsSwitching(true);
     setIsCameraReady(false);
-    
-    // Allow toggle to timeout so it doesn't lock forever on silent failures
-    setTimeout(() => {
-      setIsSwitching(false);
-    }, 2500);
 
-    setFacingMode(prev => prev === 'user' ? 'environment' : 'user');
-  }, [isSwitching]);
+    const newMode = facingModeRef.current === 'user' ? 'environment' : 'user';
+    setFacingMode(newMode);
+
+    try {
+      await setupCamera(newMode);
+    } catch (err) {
+      console.error('Camera toggle failed:', err);
+    } finally {
+      setIsSwitching(false);
+    }
+  }, [isSwitching, setupCamera]);
 
   // Init on mount
   useEffect(() => {
     isMounted.current = true;
-    
+
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get('custom') === 'new') {
       setIsCustomizing(true);
     }
-    
-    let initial = NAIL_DESIGNS[0];
-    
-    loadNailImage(initial);
+
+    loadNailImage(NAIL_DESIGNS[0]);
+    setupCamera('user');
+
     return () => {
       isMounted.current = false;
-      stopCurrentCamera();
+      stopEverything();
       if (handsRef.current) {
         handsRef.current.close().catch(() => {});
         handsRef.current = null;
       }
     };
-  }, [loadNailImage, stopCurrentCamera]);
-
-  useEffect(() => {
-    if (isMounted.current) {
-      setupCamera(facingMode);
-    }
-  }, [facingMode, setupCamera]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Reload nail image when design changes
   useEffect(() => {
@@ -349,7 +459,7 @@ function CameraView() {
         <div className="flex items-center justify-between p-3 sm:p-4">
           <Link
             href="/"
-            onClick={() => stopCurrentCamera()}
+            onClick={() => stopEverything()}
             className="flex items-center gap-1.5 px-3 py-2 sm:px-4 sm:py-2.5 rounded-full bg-black/40 backdrop-blur-xl text-white text-xs sm:text-sm font-medium active:scale-95 transition-transform"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -447,22 +557,24 @@ function CameraView() {
               </button>
             </div>
 
-            {/* Flip camera — larger tap target on mobile */}
-            <button
-              onClick={toggleCamera}
-              disabled={!isCameraReady || isSwitching}
-              className={`flex-shrink-0 px-5 py-2.5 sm:px-6 sm:py-3 rounded-full text-xs sm:text-sm font-medium transition-all active:scale-95 ${isCameraReady && !isSwitching
-                ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-lg shadow-pink-500/20'
-                : 'bg-white/10 text-white/30 cursor-not-allowed'
-                }`}
-            >
-              <span className="flex items-center gap-1.5">
-                <svg className={`w-4 h-4 ${isSwitching ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-                {isSwitching ? 'Flipping...' : 'Flip'}
-              </span>
-            </button>
+            {/* Flip camera — ONLY visible on mobile devices */}
+            {isMobileDevice && (
+              <button
+                onClick={toggleCamera}
+                disabled={!isCameraReady || isSwitching}
+                className={`flex-shrink-0 px-5 py-2.5 rounded-full text-xs font-medium transition-all active:scale-95 ${isCameraReady && !isSwitching
+                  ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-lg shadow-pink-500/20'
+                  : 'bg-white/10 text-white/30 cursor-not-allowed'
+                  }`}
+              >
+                <span className="flex items-center gap-1.5">
+                  <svg className={`w-4 h-4 ${isSwitching ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  {isSwitching ? 'Flipping...' : 'Flip'}
+                </span>
+              </button>
+            )}
 
             {/* Capture */}
             <div className="flex items-center px-2.5 py-2 rounded-full bg-black/40 backdrop-blur-xl">
@@ -499,6 +611,18 @@ function CameraView() {
         </div>
       )}
 
+      {/* Switching overlay */}
+      {isSwitching && (
+        <div className="absolute inset-0 z-35 bg-black/60 flex items-center justify-center">
+          <div className="text-center">
+            <svg className="w-10 h-10 text-white animate-spin mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            <p className="text-white/80 text-sm font-medium">Switching Camera...</p>
+          </div>
+        </div>
+      )}
+
       {/* Error overlay */}
       {error && (
         <div className="absolute inset-0 z-40 bg-black/80 flex items-center justify-center px-4">
@@ -514,7 +638,7 @@ function CameraView() {
               <button
                 onClick={() => {
                   setError(null);
-                  setupCamera(facingMode);
+                  setupCamera(facingModeRef.current);
                 }}
                 className="w-full py-2.5 bg-gradient-to-r from-pink-600 to-purple-600 rounded-full text-white font-medium text-sm active:scale-95 transition-transform"
               >
