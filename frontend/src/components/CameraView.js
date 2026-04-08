@@ -146,61 +146,29 @@ function CameraView() {
             fingerTips.forEach((tipIndex) => {
               const tip = landmarks[tipIndex];
               const joint = landmarks[tipIndex - 1]; // DIP joint
-              const pip = landmarks[tipIndex - 2];   // PIP joint (one more below)
-
-              // Per-finger visibility: check if the nail side is facing the camera
-              // using z-depth. Tip being closer (smaller z) than DIP means nail faces camera.
-              // We also check PIP for a more stable signal.
-              const zDiffTipJoint = joint.z - tip.z;  // positive = tip closer = nail visible
-              const zDiffJointPip = pip.z - joint.z;
-
-              // Combined z signal — if fingertip area is generally facing camera, show nail
-              const zSignal = zDiffTipJoint + zDiffJointPip * 0.5;
-
-              // Smooth opacity: fully visible when clearly nail-side, fades when transitioning
-              // This prevents the jarring on/off flicker at edge angles
-              let opacity;
-              if (zSignal > 0.01) {
-                opacity = 1.0; // Clearly nail-side facing camera
-              } else if (zSignal > -0.02) {
-                // Transition zone — smooth fade
-                opacity = (zSignal + 0.02) / 0.03;
-              } else {
-                opacity = 0; // Clearly palm-side facing camera
-              }
-
-              if (opacity <= 0) return; // Skip fully invisible fingers
 
               const tipX = tip.x * width;
               const tipY = tip.y * height;
               const jointX = joint.x * width;
               const jointY = joint.y * height;
-              const pipX = pip.x * width;
-              const pipY = pip.y * height;
 
-              // Use tip-to-PIP distance for more accurate finger length measurement
-              const segmentLen = Math.sqrt((tipX - pipX) ** 2 + (tipY - pipY) ** 2);
+              // Tip-to-DIP distance = nail bed length
               const tipToJoint = Math.sqrt((tipX - jointX) ** 2 + (tipY - jointY) ** 2);
 
-              // Nail dimensions: height covers tip-to-PIP, width is proportional
-              // Scale factor from the user-adjustable size (100 = full coverage)
+              // Nail dimensions based on tip-to-DIP distance
               const scaleFactor = currentNailSize / 100;
-              const nailHeight = segmentLen * 0.95 * scaleFactor;
-              const nailWidth = tipToJoint * 1.8 * scaleFactor;
+              const nailHeight = tipToJoint * 1.3 * scaleFactor;
+              const nailWidth = tipToJoint * 1.4 * scaleFactor;
 
               // Angle from tip pointing toward the joint (along the finger)
               const angle = Math.atan2(jointY - tipY, jointX - tipX);
 
-              // Position: center the nail between tip and DIP joint (the nail bed area)
-              const centerX = (tipX + jointX) / 2;
-              const centerY = (tipY + jointY) / 2;
-
+              // Anchor at the fingertip — nail extends from tip toward the knuckle
               ctx.save();
-              ctx.globalAlpha = Math.min(1, Math.max(0, opacity));
-              ctx.translate(centerX, centerY);
+              ctx.translate(tipX, tipY);
               ctx.rotate(angle - Math.PI / 2);
-              // Draw with nail centered — width along finger width, height along finger length
-              ctx.drawImage(nailImageRef.current, -nailWidth / 2, -nailHeight / 2, nailWidth, nailHeight);
+              // Top of nail image (free edge) at tip, extends downward toward joint
+              ctx.drawImage(nailImageRef.current, -nailWidth / 2, 0, nailWidth, nailHeight);
               ctx.restore();
             });
           }
