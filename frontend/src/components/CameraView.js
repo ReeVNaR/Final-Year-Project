@@ -167,8 +167,8 @@ function CameraView() {
               ctx.save();
               ctx.translate(tipX, tipY);
               ctx.rotate(angle - Math.PI / 2);
-              // Top of nail image (free edge) at tip, extends downward toward joint
-              ctx.drawImage(nailImageRef.current, -nailWidth / 2, 0, nailWidth, nailHeight);
+              // Bottom of nail image sits at fingertip, extends outward away from finger
+              ctx.drawImage(nailImageRef.current, -nailWidth / 2, -nailHeight, nailWidth, nailHeight);
               ctx.restore();
             });
           }
