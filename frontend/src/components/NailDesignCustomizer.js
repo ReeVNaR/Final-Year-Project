@@ -256,7 +256,7 @@ export default function NailDesignCustomizer({ onApply, onClose }) {
   };
 
   return (
-    <div className="absolute inset-0 z-50 bg-black/95 text-white overflow-hidden flex flex-col">
+    <div className="absolute inset-0 z-50 bg-black/95 text-white flex flex-col">
       {/* Ambient background effects */}
       <div className="fixed inset-0 pointer-events-none">
         <div className="absolute top-[-30%] left-[-20%] w-[70%] h-[70%] rounded-full bg-pink-500/5 blur-[120px] animate-glow-breathe" />
@@ -285,13 +285,13 @@ export default function NailDesignCustomizer({ onApply, onClose }) {
       </div>
 
       {/* Main content */}
-      <div className="relative z-10 flex flex-col lg:flex-row items-center justify-center gap-6 lg:gap-12 px-4 sm:px-6 pb-8 pt-2 max-w-7xl mx-auto">
+      <div className="relative z-10 flex-1 overflow-y-auto flex flex-col lg:flex-row items-center lg:justify-center gap-4 sm:gap-6 lg:gap-12 px-4 sm:px-6 pb-8 pt-2 max-w-7xl mx-auto w-full">
         {/* Left — Canvas Preview */}
         <div className="relative flex-shrink-0">
           {/* Glow behind the nail */}
           <div className="absolute inset-0 -m-8 rounded-full bg-gradient-to-br from-pink-500/10 to-purple-500/10 blur-3xl animate-glow-breathe" />
 
-          <div className="relative bg-zinc-900/50 backdrop-blur-xl border border-white/10 rounded-3xl p-6 sm:p-8">
+          <div className="relative bg-zinc-900/50 backdrop-blur-xl border border-white/10 rounded-3xl p-4 sm:p-6 md:p-8">
             {/* Canvas container */}
             <div
               className="relative cursor-move select-none"
@@ -306,7 +306,7 @@ export default function NailDesignCustomizer({ onApply, onClose }) {
                 ref={canvasRef}
                 width={CANVAS_WIDTH}
                 height={CANVAS_HEIGHT}
-                className="w-[260px] h-[364px] sm:w-[320px] sm:h-[448px] md:w-[380px] md:h-[532px] rounded-2xl"
+                className="w-[200px] h-[280px] sm:w-[320px] sm:h-[448px] md:w-[380px] md:h-[532px] rounded-2xl"
                 style={{ imageRendering: 'auto' }}
               />
 

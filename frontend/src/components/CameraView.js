@@ -61,6 +61,7 @@ function CameraView() {
   const canvasRef = useRef(null);
   const nailImageRef = useRef(null);
   const handsRef = useRef(null);
+  const loadingHandsRef = useRef(false);
   const animFrameRef = useRef(null);
   const processingRef = useRef(false);
   const facingModeRef = useRef('user');
@@ -202,30 +203,53 @@ function CameraView() {
 
   // Initialize MediaPipe Hands (only once)
   const initializeHands = useCallback(async () => {
+    // If instance already exists, use it
     if (handsRef.current) return handsRef.current;
-
-    setIsModelLoading(true);
-    const hands = new Hands({
-      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
-    });
-    await hands.setOptions({
-      maxNumHands: 2,
-      modelComplexity: 1,
-      minDetectionConfidence: 0.6,
-      minTrackingConfidence: 0.5,
-    });
-    hands.onResults(onResults);
-    await hands.initialize();
-
-    if (!isMounted.current) {
-      hands.close();
-      return null;
+    
+    // If already loading, wait for it to finish
+    if (loadingHandsRef.current) {
+      while (loadingHandsRef.current) {
+        await new Promise(r => setTimeout(r, 100));
+      }
+      return handsRef.current;
     }
+    
+    loadingHandsRef.current = true;
+    setIsModelLoading(true);
+    
+    try {
+      const hands = new Hands({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${file}`,
+      });
+      
+      await hands.setOptions({
+        maxNumHands: 2,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.6,
+        minTrackingConfidence: 0.5,
+      });
+      
+      hands.onResults(onResults);
+      await hands.initialize();
 
-    handsRef.current = hands;
-    setIsModelLoading(false);
-    return hands;
-  }, [onResults]);
+      if (!isMounted.current) {
+        hands.close();
+        return null;
+      }
+
+      handsRef.current = hands;
+      setIsModelLoading(false);
+      return hands;
+    } catch (err) {
+      console.error('Hands initialization failed:', err);
+      setError('Failed to load AI model. Please check your internet connection and refresh.');
+      stopEverything();
+      setIsModelLoading(false);
+      return null;
+    } finally {
+      loadingHandsRef.current = false;
+    }
+  }, [onResults, stopEverything]);
 
   // The detection loop — sends video frames to MediaPipe
   const startDetectionLoop = useCallback(() => {
@@ -321,20 +345,47 @@ function CameraView() {
       video.setAttribute('playsinline', 'true');
       video.setAttribute('webkit-playsinline', 'true');
       video.muted = true;
+      video.load(); // Force load to trigger events
 
-      // 5. Wait for video to be ready
-      await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('Video load timeout')), 8000);
-        video.onloadedmetadata = () => {
+      // 5. Wait for video to be ready (Polling + Events for maximum compatibility)
+      await new Promise((resolve) => {
+        let resolved = false;
+        const timeout = setTimeout(() => {
+          if (!resolved) {
+            console.warn('Video load taking longer than expected...');
+            // Don't reject, just resolve and hope it eventually starts
+            resolve();
+          }
+        }, 15000);
+
+        const onVideoReady = () => {
+          if (resolved) return;
+          resolved = true;
           clearTimeout(timeout);
-          video.play()
-            .then(resolve)
-            .catch(resolve); // Even if autoplay is blocked, continue
+          video.onloadedmetadata = null;
+          video.onloadeddata = null;
+          video.oncanplay = null;
+          video.play().then(resolve).catch(resolve);
         };
-        video.onerror = () => {
-          clearTimeout(timeout);
-          reject(new Error('Video element error'));
+
+        // Polling fallback
+        const checkVideo = () => {
+          if (resolved || !isMounted.current) return;
+          if (video.videoWidth > 0 && video.readyState >= 2) {
+            onVideoReady();
+          } else {
+            requestAnimationFrame(checkVideo);
+          }
         };
+
+        if (video.readyState >= 2 && video.videoWidth > 0) {
+          onVideoReady();
+        } else {
+          video.onloadedmetadata = onVideoReady;
+          video.onloadeddata = onVideoReady;
+          video.oncanplay = onVideoReady;
+          requestAnimationFrame(checkVideo);
+        }
       });
 
       if (!isMounted.current) {
@@ -406,6 +457,8 @@ function CameraView() {
       setIsCustomizing(true);
     }
 
+    // Start everything in parallel
+    initializeHands();
     loadNailImage(NAIL_DESIGNS[0]);
     setupCamera('user');
 
@@ -413,7 +466,7 @@ function CameraView() {
       isMounted.current = false;
       stopEverything();
       if (handsRef.current) {
-        handsRef.current.close().catch(() => {});
+        handsRef.current.close().catch(() => { });
         handsRef.current = null;
       }
     };
