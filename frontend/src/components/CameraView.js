@@ -138,7 +138,28 @@ function CameraView() {
         setHandsDetected(true);
         if (nailImageRef.current) {
           const currentNailSize = nailSizeRef.current;
-          for (const landmarks of results.multiHandLandmarks) {
+          results.multiHandLandmarks.forEach((landmarks, handIndex) => {
+            const handedness = results.multiHandedness[handIndex]?.label || 'Right';
+
+            // Calculate hand orientation (Back vs Palm)
+            // Using cross product of vectors (Wrist->Index MCP) and (Wrist->Pinky MCP)
+            const wrist = landmarks[0];
+            const indexMcp = landmarks[5];
+            const pinkyMcp = landmarks[17];
+
+            const v1 = { x: indexMcp.x - wrist.x, y: indexMcp.y - wrist.y };
+            const v2 = { x: pinkyMcp.x - wrist.x, y: pinkyMcp.y - wrist.y };
+
+            // In MediaPipe's top-left origin coordinate system:
+            // For Right hand back: Index is left of Pinky -> Cross product > 0
+            // For Left hand back: Index is right of Pinky -> Cross product < 0
+            // (Flipped signs as per user feedback to match actual camera/handedness mapping)
+            const crossProduct = v1.x * v2.y - v1.y * v2.x;
+            const isBack = handedness === 'Right' ? crossProduct < 0 : crossProduct > 0;
+
+            // Only render nails if the back of the hand is facing the camera
+            if (!isBack) return;
+
             // Finger tip indices and their corresponding DIP (joint below tip) indices
             // Thumb: tip=4, dip=3  |  Index: tip=8, dip=7  |  Middle: tip=12, dip=11
             // Ring: tip=16, dip=15  |  Pinky: tip=20, dip=19
@@ -173,7 +194,7 @@ function CameraView() {
               ctx.drawImage(nailImageRef.current, -nailWidth / 2, -nailHeight + offsetY, nailWidth, nailHeight);
               ctx.restore();
             });
-          }
+          });
         }
       } else {
         setHandsDetected(false);
