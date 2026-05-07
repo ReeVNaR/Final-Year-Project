@@ -64,6 +64,10 @@ const HomePage = () => {
     { title: 'Glitter Dreams', price: '₹1,499', image: '/images/glitter-dreams.png', tag: 'Trending' },
     { title: 'Abstract Art', price: '₹1,999', image: '/images/abstract-art.png', tag: 'New' },
     { title: 'Floral Beauty', price: '₹1,499', image: '/images/floral-beauty.png', tag: 'Popular' },
+    { title: 'Deep Red', price: '₹899', image: '/images/nails/deep-red.png', tag: 'Classic' },
+    { title: 'Chrome Silver', price: '₹1,799', image: '/images/nails/chrome-silver.png', tag: 'Glam' },
+    { title: 'Ombré Pink', price: '₹1,299', image: '/images/nails/ombre-pink.png', tag: 'Artistic' },
+    { title: 'Galaxy', price: '₹1,699', image: '/images/nails/galaxy.png', tag: 'New' },
   ];
 
   const features = [
@@ -84,7 +88,7 @@ const HomePage = () => {
     { name: 'Ananya Verma', role: 'Fashion Enthusiast, Delhi', text: 'Love how easy it is to try different styles. The AI detection works flawlessly even on my phone.', rating: 5 },
   ];
 
-  const marqueeItems = ['Classic French', '✦', 'Glitter Dreams', '✦', 'Abstract Art', '✦', 'Floral Beauty', '✦', 'Rose Gold', '✦', 'Marble Luxe', '✦', 'Chrome Nails', '✦', 'Ombré Pink', '✦'];
+  const marqueeItems = ['Classic French', '✦', 'Glitter Dreams', '✦', 'Abstract Art', '✦', 'Floral Beauty', '✦', 'Rose Gold', '✦', 'Marble Luxe', '✦', 'Chrome Nails', '✦', 'Ombré Pink', '✦', 'Deep Red', '✦', 'Galaxy', '✦', 'Emerald', '✦', 'Matte Black', '✦', 'Sakura', '✦', 'Lavender', '✦'];
 
   return (
     <>

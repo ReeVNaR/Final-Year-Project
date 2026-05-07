@@ -4,10 +4,29 @@ import Link from 'next/link';
 import { Hands } from '@mediapipe/hands';
 import NailDesignCustomizer from './NailDesignCustomizer';
 
+const DESIGN_CATEGORIES = ['All', 'Classic', 'Glam', 'Bold', 'Artistic', 'Minimal'];
+
 const NAIL_DESIGNS = [
-  { id: 1, name: 'French', image: '/images/nails/french.png', color: '#f5d5c8' },
-  { id: 2, name: 'Rose Gold', image: '/images/nails/gold.png', color: '#d4a574' },
-  { id: 3, name: 'Pink', image: '/images/nails/pink.png', color: '#ec4899' },
+  // Classic
+  { id: 1, name: 'French', image: '/images/nails/french.png', color: '#f5d5c8', category: 'Classic' },
+  { id: 4, name: 'Nude', image: '/images/nails/nude.png', color: '#d4a89a', category: 'Classic' },
+  { id: 5, name: 'Coral', image: '/images/nails/coral.png', color: '#f97066', category: 'Classic' },
+  // Glam
+  { id: 2, name: 'Rose Gold', image: '/images/nails/gold.png', color: '#d4a574', category: 'Glam' },
+  { id: 6, name: 'Glitter Gold', image: '/images/nails/glitter-gold.png', color: '#d4af37', category: 'Glam' },
+  { id: 7, name: 'Chrome', image: '/images/nails/chrome-silver.png', color: '#c0c0c0', category: 'Glam' },
+  // Bold
+  { id: 3, name: 'Pink', image: '/images/nails/pink.png', color: '#ec4899', category: 'Bold' },
+  { id: 8, name: 'Deep Red', image: '/images/nails/deep-red.png', color: '#991b1b', category: 'Bold' },
+  { id: 9, name: 'Emerald', image: '/images/nails/emerald.png', color: '#059669', category: 'Bold' },
+  { id: 10, name: 'Matte Black', image: '/images/nails/matte-black.png', color: '#1a1a1a', category: 'Bold' },
+  // Artistic
+  { id: 11, name: 'Ombré Pink', image: '/images/nails/ombre-pink.png', color: '#d946ef', category: 'Artistic' },
+  { id: 12, name: 'Marble', image: '/images/nails/marble.png', color: '#e2e8f0', category: 'Artistic' },
+  { id: 13, name: 'Galaxy', image: '/images/nails/galaxy.png', color: '#312e81', category: 'Artistic' },
+  { id: 14, name: 'Sakura', image: '/images/nails/cherry-blossom.png', color: '#fbcfe8', category: 'Artistic' },
+  // Minimal
+  { id: 15, name: 'Lavender', image: '/images/nails/lavender.png', color: '#a78bfa', category: 'Minimal' },
 ];
 
 class CameraErrorBoundary extends React.Component {
@@ -79,6 +98,7 @@ function CameraView() {
   const [isCustomizing, setIsCustomizing] = useState(false);
   const [facingMode, setFacingMode] = useState('user');
   const [isMobileDevice, setIsMobileDevice] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState('All');
 
   // Keep refs in sync with state
   useEffect(() => { facingModeRef.current = facingMode; }, [facingMode]);
@@ -570,45 +590,95 @@ function CameraView() {
 
       {/* Design panel */}
       {showDesignPanel && (
-        <div className="absolute bottom-[130px] sm:bottom-36 left-4 right-4 z-30 flex justify-center animate-fade-in">
-          <div className="bg-black/60 backdrop-blur-2xl border border-white/10 rounded-2xl p-3 sm:p-4 w-full max-w-xs">
-            <p className="text-white/40 text-[10px] uppercase tracking-[0.2em] mb-2.5 text-center font-medium">Nail Designs</p>
-            <div className="flex flex-wrap justify-center gap-2 sm:gap-3">
-              {availableDesigns.map((design) => (
+        <div className="absolute bottom-[130px] sm:bottom-36 left-3 right-3 z-30 flex justify-center animate-fade-in">
+          <div className="bg-black/70 backdrop-blur-2xl border border-white/10 rounded-2xl p-3 sm:p-4 w-full max-w-md">
+            {/* Panel header */}
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-white/40 text-[10px] uppercase tracking-[0.2em] font-medium">Nail Designs</p>
+              <span className="text-white/20 text-[10px]">
+                {(selectedCategory === 'All' ? availableDesigns : availableDesigns.filter(d => d.category === selectedCategory)).length} designs
+              </span>
+            </div>
+
+            {/* Category tabs */}
+            <div className="flex gap-1.5 mb-3 overflow-x-auto pb-1 scrollbar-hide">
+              {DESIGN_CATEGORIES.map((cat) => (
                 <button
-                  key={design.id}
-                  onClick={() => {
-                    setSelectedDesign(design);
-                    setShowDesignPanel(false);
-                  }}
-                  className={`flex flex-col items-center gap-1.5 p-2 sm:p-3 rounded-xl transition-all active:scale-95 ${selectedDesign.id === design.id ? 'bg-pink-500/20 ring-1 ring-pink-500/50' : 'hover:bg-white/5'
-                    }`}
+                  key={cat}
+                  onClick={() => setSelectedCategory(cat)}
+                  className={`px-3 py-1.5 rounded-lg text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider whitespace-nowrap transition-all active:scale-95 ${
+                    selectedCategory === cat
+                      ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-lg shadow-pink-500/20'
+                      : 'bg-white/5 text-white/40 hover:text-white/70 hover:bg-white/10'
+                  }`}
                 >
-                  <div
-                    className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl overflow-hidden border-2 transition-all"
-                    style={{ borderColor: selectedDesign.id === design.id ? '#ec4899' : 'rgba(255,255,255,0.1)' }}
-                  >
-                    <img src={design.image} alt={design.name} className="w-full h-full object-contain bg-white/5" />
-                  </div>
-                  <span className="text-white text-[11px] sm:text-xs font-medium">{design.name}</span>
+                  {cat}
                 </button>
               ))}
-              
-              {/* Add Custom Design Button */}
-              <button
-                onClick={() => {
-                  setShowDesignPanel(false);
-                  setIsCustomizing(true);
-                }}
-                className="flex flex-col items-center gap-1.5 p-2 sm:p-3 rounded-xl transition-all hover:bg-white/5 active:scale-95"
-              >
-                <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl border-2 border-dashed border-white/20 flex items-center justify-center text-white/40 hover:text-white hover:border-white/50 transition-all bg-white/5">
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                  </svg>
-                </div>
-                <span className="text-white/70 text-[11px] sm:text-xs font-medium">Custom</span>
-              </button>
+            </div>
+
+            {/* Design grid — scrollable */}
+            <div className="max-h-[200px] sm:max-h-[240px] overflow-y-auto overflow-x-hidden pr-1 scrollbar-thin">
+              <div className="grid grid-cols-4 sm:grid-cols-5 gap-2">
+                {(selectedCategory === 'All'
+                  ? availableDesigns
+                  : availableDesigns.filter(d => d.category === selectedCategory)
+                ).map((design) => (
+                  <button
+                    key={design.id}
+                    onClick={() => {
+                      setSelectedDesign(design);
+                      setShowDesignPanel(false);
+                    }}
+                    className={`flex flex-col items-center gap-1 p-1.5 sm:p-2 rounded-xl transition-all active:scale-95 ${
+                      selectedDesign.id === design.id
+                        ? 'bg-pink-500/20 ring-1 ring-pink-500/50 shadow-lg shadow-pink-500/10'
+                        : 'hover:bg-white/5'
+                    }`}
+                  >
+                    <div
+                      className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl overflow-hidden border-2 transition-all relative group"
+                      style={{
+                        borderColor: selectedDesign.id === design.id ? '#ec4899' : 'rgba(255,255,255,0.08)',
+                      }}
+                    >
+                      <img
+                        src={design.image}
+                        alt={design.name}
+                        className="w-full h-full object-cover bg-white/5 group-hover:scale-110 transition-transform duration-300"
+                      />
+                      {selectedDesign.id === design.id && (
+                        <div className="absolute inset-0 bg-pink-500/10 flex items-center justify-center">
+                          <svg className="w-4 h-4 text-pink-400" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                          </svg>
+                        </div>
+                      )}
+                    </div>
+                    <span className={`text-[10px] sm:text-[11px] font-medium truncate w-full text-center ${
+                      selectedDesign.id === design.id ? 'text-pink-400' : 'text-white/60'
+                    }`}>
+                      {design.name}
+                    </span>
+                  </button>
+                ))}
+
+                {/* Add Custom Design Button */}
+                <button
+                  onClick={() => {
+                    setShowDesignPanel(false);
+                    setIsCustomizing(true);
+                  }}
+                  className="flex flex-col items-center gap-1 p-1.5 sm:p-2 rounded-xl transition-all hover:bg-white/5 active:scale-95"
+                >
+                  <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl border-2 border-dashed border-white/15 flex items-center justify-center text-white/30 hover:text-pink-400 hover:border-pink-500/30 transition-all bg-white/[0.02]">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                    </svg>
+                  </div>
+                  <span className="text-white/40 text-[10px] sm:text-[11px] font-medium">Custom</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
